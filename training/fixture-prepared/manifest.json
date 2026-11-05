@@ -1,0 +1,20 @@
+{
+  "format_version": 1,
+  "fixture_only": true,
+  "training_ready": false,
+  "reason": "Exact tokenizer length check and GPU memory gate still required",
+  "sources_digest": "29fe5110a826821888446258c451954133eea9a1dba92e605d8393412d92ba33",
+  "examples_digest": "4ea8db4dc35c2c510d970a78eab5ebaade5132e1a280fcd37e2b7418b04be53d",
+  "counts": {
+    "train": 1,
+    "valid": 1,
+    "test": 3
+  },
+  "tasks": {
+    "plan": 3,
+    "select": 1,
+    "rank": 1
+  },
+  "source_groups": 3,
+  "contracts_digest": "8d86288b7724e71e162e3154b45963bf3bdc0d670d543d89106ddb003920d03a"
+}

@@ -1,0 +1,24 @@
+data/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv/
+*.log
+*.pem
+*.key
+*cookies*.txt
+# Private local reference frames are not distributed with the application.
+static/reference-challenge.jpg
+static/reference-reaction.jpg
+training/base*/
+training/.venv/
+training/adapters/
+training/prepared/
+training/memory-gate-data/
+training/sources.jsonl
+training/examples.jsonl
+training/human-judgments.jsonl
+training/*-predictions.jsonl

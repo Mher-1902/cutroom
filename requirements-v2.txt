@@ -1,0 +1,8 @@
+numpy
+pillow
+scenedetect
+opencv-python
+torch
+torchaudio
+transformers
+whisperx

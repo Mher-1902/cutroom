@@ -1,0 +1,81 @@
+Cutroom local audio library
+All bundled audio is CC0-1.0. Source-specific publisher evidence is in licenses/.
+Full CC0 text copied from the SPDX license registry: https://raw.githubusercontent.com/spdx/license-list-data/main/text/CC0-1.0.txt
+
+action-techno — Fast Fun Action Techno Loop — annandistance
+https://opengameart.org/content/fast-fun-action-techno-loop-1
+
+action-racing — As Fast As You Can — Centurion_of_war
+https://opengameart.org/content/as-fast-as-you-can
+
+tension-suspense — Suspense — wipics
+https://opengameart.org/content/suspense-0
+
+tension-infiltration — Infiltration — Adiutorium
+https://opengameart.org/content/infiltration
+
+comedy-banana — Banana Track — skrjablin
+https://opengameart.org/content/banana-track
+
+comedy-wacky — Wacky Wobblings — Fupi
+https://opengameart.org/content/wacky-wobblings
+
+relaxed-lofi — Lofi Hip Hop Loop — omfgdude
+https://opengameart.org/content/lofi-hip-hop-loop
+
+relaxed-heavenly — Heavenly Loop — isaiah658
+https://opengameart.org/content/heavenly-loop
+
+sfx-confirmation — Confirmation — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-error — Error — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-question — Question — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-bong — Bong — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-pluck — Pluck — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-glitch — Glitch — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-tick — Tick — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-select — Select — Kenney Vleugels
+https://kenney.nl/assets/interface-sounds
+
+sfx-impact-soft — Impact Soft — Kenney Vleugels
+https://kenney.nl/assets/impact-sounds
+
+sfx-impact-punch — Impact Punch — Kenney Vleugels
+https://kenney.nl/assets/impact-sounds
+
+sfx-impact-bell — Impact Bell — Kenney Vleugels
+https://kenney.nl/assets/impact-sounds
+
+sfx-impact-metal — Impact Metal — Kenney Vleugels
+https://kenney.nl/assets/impact-sounds
+
+sfx-impact-wood — Impact Wood — Kenney Vleugels
+https://kenney.nl/assets/impact-sounds
+
+sfx-whoosh — Whoosh — Kenney Vleugels
+https://kenney.nl/assets/rpg-audio
+
+sfx-whoosh-soft — Whoosh Soft — Kenney Vleugels
+https://kenney.nl/assets/rpg-audio
+
+sfx-page-flip — Page Flip — Kenney Vleugels
+https://kenney.nl/assets/rpg-audio
+
+sfx-coin-reward — Coin Reward — Kenney Vleugels
+https://kenney.nl/assets/rpg-audio
+
+sfx-metal-click — Metal Click — Kenney Vleugels
+https://kenney.nl/assets/rpg-audio

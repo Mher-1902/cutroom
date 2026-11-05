@@ -1,0 +1,20 @@
+{
+  "rights": {
+    "basis": null,
+    "permits_training": false,
+    "holder": null,
+    "evidence": null,
+    "verified_by": null,
+    "verified_on": null
+  },
+  "label": {
+    "origin": null,
+    "reviewer": null,
+    "reviewed_on": null,
+    "approved": false,
+    "full_source_reviewed": false,
+    "all_claims_supported": false,
+    "timings_verified": false
+  },
+  "source_group": "One original episode/event plus every crop, reupload, overlapping window and derivative"
+}

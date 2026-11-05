@@ -1,0 +1,27 @@
+{
+  "training_ready": false,
+  "reason": "Inventory only. Exact token checks and a monitored 4-step training memory gate remain mandatory",
+  "python": "3.15.2",
+  "machine": "arm64",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "ram_gib": null,
+  "swap": null,
+  "disk_free_gib": 720.98,
+  "packages": {
+    "mlx": "0.32.4",
+    "mlx-lm": null,
+    "transformers": null,
+    "huggingface-hub": null
+  },
+  "potential_competing_processes": [],
+  "process_telemetry_available": false,
+  "base_present": false,
+  "dataset_present": false,
+  "blockers": [
+    "Sandbox hides system/process telemetry; inventory cannot establish an idle GPU or memory headroom",
+    "Use an isolated Python 3.11\u20133.13 environment; inspected release lists these versions",
+    "Inspected MLX-LM 0.32.2 training environment is not installed here",
+    "Pinned local Qwen3 MLX 4-bit snapshot is missing or has a different config",
+    "Licensed human dataset with source-grouped train/valid/test is missing"
+  ]
+}

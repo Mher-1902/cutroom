@@ -1,0 +1,378 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "sfx-confirmation",
+      "title": "Confirmation",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-confirmation.ogg",
+      "kind": "sfx",
+      "category": "reward",
+      "mood": "action",
+      "moods": [
+        "action",
+        "relaxed"
+      ],
+      "bpm": null,
+      "duration": 0.539,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/confirmation_002.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c"
+    },
+    {
+      "id": "sfx-error",
+      "title": "Error",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-error.ogg",
+      "kind": "sfx",
+      "category": "error",
+      "mood": "comedy",
+      "moods": [
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.5,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/error_006.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "a97513d7fd2b12b1210c423be943b4c1ab0e899b11db95855e9b74836e646ae0"
+    },
+    {
+      "id": "sfx-question",
+      "title": "Question",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-question.ogg",
+      "kind": "sfx",
+      "category": "question",
+      "mood": "comedy",
+      "moods": [
+        "comedy",
+        "tension"
+      ],
+      "bpm": null,
+      "duration": 0.491,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/question_001.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "abb8f9e4eb2071491b0b15f84ee302386b1847609310c1b000ae174639a6cc5a"
+    },
+    {
+      "id": "sfx-bong",
+      "title": "Bong",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-bong.ogg",
+      "kind": "sfx",
+      "category": "accent",
+      "mood": "comedy",
+      "moods": [
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.123,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/bong_001.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "d21d0f0b782445db579d11e2506b24cd1ac9d664ee33aeaf807761aa7b6fd710"
+    },
+    {
+      "id": "sfx-pluck",
+      "title": "Pluck",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-pluck.ogg",
+      "kind": "sfx",
+      "category": "accent",
+      "mood": "comedy",
+      "moods": [
+        "comedy",
+        "relaxed"
+      ],
+      "bpm": null,
+      "duration": 0.165,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/pluck_002.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "c977fe249ff42d1c93a552b33abc13a8399df3879fa510475426e5c4bbac1da9"
+    },
+    {
+      "id": "sfx-glitch",
+      "title": "Glitch",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-glitch.ogg",
+      "kind": "sfx",
+      "category": "transition",
+      "mood": "action",
+      "moods": [
+        "action",
+        "tension"
+      ],
+      "bpm": null,
+      "duration": 0.023,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/glitch_004.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "d0f4db4d12f88592bc328bd621d356d099eaa2dda37bab37a6cf17891c5026d1"
+    },
+    {
+      "id": "sfx-tick",
+      "title": "Tick",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-tick.ogg",
+      "kind": "sfx",
+      "category": "tick",
+      "mood": "tension",
+      "moods": [
+        "tension"
+      ],
+      "bpm": null,
+      "duration": 0.023,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/tick_001.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "9d057b918024c787bbe6c00beed13a7ef72a3fa0c259add3cef36582792f4230"
+    },
+    {
+      "id": "sfx-select",
+      "title": "Select",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-select.ogg",
+      "kind": "sfx",
+      "category": "click",
+      "mood": "relaxed",
+      "moods": [
+        "relaxed"
+      ],
+      "bpm": null,
+      "duration": 1.944,
+      "source_url": "https://kenney.nl/assets/interface-sounds",
+      "source_file": "Audio/select_006.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-interface-sounds.txt",
+      "sha256": "b44550fa8d3276c072ce7c3c1315d949f7a28a95bc22b3618ad4eea62eac8abe"
+    },
+    {
+      "id": "sfx-impact-soft",
+      "title": "Impact Soft",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-impact-soft.ogg",
+      "kind": "sfx",
+      "category": "impact",
+      "mood": "action",
+      "moods": [
+        "action",
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.505,
+      "source_url": "https://kenney.nl/assets/impact-sounds",
+      "source_file": "Audio/impactSoft_heavy_000.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-impact-sounds.txt",
+      "sha256": "49e7ca88743fca974bb8676ea138b751cfd8f9033b5e7af8736c2a215d6edbc1"
+    },
+    {
+      "id": "sfx-impact-punch",
+      "title": "Impact Punch",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-impact-punch.ogg",
+      "kind": "sfx",
+      "category": "impact",
+      "mood": "action",
+      "moods": [
+        "action",
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.649,
+      "source_url": "https://kenney.nl/assets/impact-sounds",
+      "source_file": "Audio/impactPunch_heavy_000.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-impact-sounds.txt",
+      "sha256": "b33a8f14068aec24ec69ba85e5e87fdc41228975f6a1a3e44a6e7d6fc3d9f8d8"
+    },
+    {
+      "id": "sfx-impact-bell",
+      "title": "Impact Bell",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-impact-bell.ogg",
+      "kind": "sfx",
+      "category": "reward",
+      "mood": "action",
+      "moods": [
+        "action",
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 1.48,
+      "source_url": "https://kenney.nl/assets/impact-sounds",
+      "source_file": "Audio/impactBell_heavy_000.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-impact-sounds.txt",
+      "sha256": "94b8bb5f2d43ab65e4bcc32b28562416e9bc2c51d9fd4be1e333660ee52f977f"
+    },
+    {
+      "id": "sfx-impact-metal",
+      "title": "Impact Metal",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-impact-metal.ogg",
+      "kind": "sfx",
+      "category": "impact",
+      "mood": "action",
+      "moods": [
+        "action",
+        "tension"
+      ],
+      "bpm": null,
+      "duration": 0.272,
+      "source_url": "https://kenney.nl/assets/impact-sounds",
+      "source_file": "Audio/impactMetal_medium_000.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-impact-sounds.txt",
+      "sha256": "a96f879fec0864a8938e0c745b6996a6c5679c16a234ce31a01cc995e8401003"
+    },
+    {
+      "id": "sfx-impact-wood",
+      "title": "Impact Wood",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-impact-wood.ogg",
+      "kind": "sfx",
+      "category": "impact",
+      "mood": "comedy",
+      "moods": [
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.266,
+      "source_url": "https://kenney.nl/assets/impact-sounds",
+      "source_file": "Audio/impactWood_light_000.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-impact-sounds.txt",
+      "sha256": "eb45e35b4bed784d3f120de4afec4b0d6ac09d9e143cce8cfcb7d739e1b1f3c3"
+    },
+    {
+      "id": "sfx-whoosh",
+      "title": "Whoosh",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-whoosh.ogg",
+      "kind": "sfx",
+      "category": "whoosh",
+      "mood": "action",
+      "moods": [
+        "action",
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.6,
+      "source_url": "https://kenney.nl/assets/rpg-audio",
+      "source_file": "Audio/knifeSlice.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-rpg-audio.txt",
+      "sha256": "4cd96dc630bed9840c15f1dd2306da2cc56a4da26a5d3f1a03c5a7265ac5e54f"
+    },
+    {
+      "id": "sfx-whoosh-soft",
+      "title": "Whoosh Soft",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-whoosh-soft.ogg",
+      "kind": "sfx",
+      "category": "whoosh",
+      "mood": "relaxed",
+      "moods": [
+        "relaxed",
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.415,
+      "source_url": "https://kenney.nl/assets/rpg-audio",
+      "source_file": "Audio/cloth2.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-rpg-audio.txt",
+      "sha256": "8a7451193c38bc05483aec25dd193e163a15d44cf7fff04ac7912573231b0201"
+    },
+    {
+      "id": "sfx-page-flip",
+      "title": "Page Flip",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-page-flip.ogg",
+      "kind": "sfx",
+      "category": "transition",
+      "mood": "relaxed",
+      "moods": [
+        "relaxed",
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.769,
+      "source_url": "https://kenney.nl/assets/rpg-audio",
+      "source_file": "Audio/bookFlip1.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-rpg-audio.txt",
+      "sha256": "fa81ac2fedc8c641661b87e349630a36c9800e795e0c800e029214efdbe26a7d"
+    },
+    {
+      "id": "sfx-coin-reward",
+      "title": "Coin Reward",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-coin-reward.ogg",
+      "kind": "sfx",
+      "category": "reward",
+      "mood": "action",
+      "moods": [
+        "action",
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 0.846,
+      "source_url": "https://kenney.nl/assets/rpg-audio",
+      "source_file": "Audio/handleCoins.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-rpg-audio.txt",
+      "sha256": "8a91f969e932df709df80ee124d86a51389eed9b67f22e5e716bc2bbf60d8dab"
+    },
+    {
+      "id": "sfx-metal-click",
+      "title": "Metal Click",
+      "creator": "Kenney Vleugels",
+      "path": "sfx/kenney-metal-click.ogg",
+      "kind": "sfx",
+      "category": "click",
+      "mood": "tension",
+      "moods": [
+        "tension",
+        "action"
+      ],
+      "bpm": null,
+      "duration": 0.446,
+      "source_url": "https://kenney.nl/assets/rpg-audio",
+      "source_file": "Audio/metalClick.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/kenney-rpg-audio.txt",
+      "sha256": "9851a69d0c613e13bceef08060ecc4148f098ef487927cbebe270d642398a3b3"
+    }
+  ]
+}

@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "action-techno",
+      "title": "Fast Fun Action Techno Loop",
+      "creator": "annandistance",
+      "path": "music/action-techno.ogg",
+      "kind": "music",
+      "mood": "action",
+      "moods": [
+        "action"
+      ],
+      "bpm": null,
+      "duration": 6.115,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/fast-fun-action-techno-loop-1",
+      "download_url": "https://opengameart.org/sites/default/files/fast_techno_action_loop_0.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/action-techno.json",
+      "sha256": "d05a950fbcf02ec06576784208bf99b891b2b117dec644bbec4f4ce6a8961cec",
+      "original_sha256": "d05a950fbcf02ec06576784208bf99b891b2b117dec644bbec4f4ce6a8961cec",
+      "transformation": null,
+      "tags": [
+        "electronic",
+        "techno",
+        "minimal"
+      ]
+    },
+    {
+      "id": "action-racing",
+      "title": "As Fast As You Can",
+      "creator": "Centurion_of_war",
+      "path": "music/action-racing.ogg",
+      "kind": "music",
+      "mood": "action",
+      "moods": [
+        "action"
+      ],
+      "bpm": null,
+      "duration": 37.333,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/as-fast-as-you-can",
+      "download_url": "https://opengameart.org/sites/default/files/as_fast_as_you_can_0.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/action-racing.json",
+      "sha256": "bfed8d39f957e1a92f25ecf49f0c804aac43e04120f48601bca064ac24e19e56",
+      "original_sha256": "bfed8d39f957e1a92f25ecf49f0c804aac43e04120f48601bca064ac24e19e56",
+      "transformation": null,
+      "tags": [
+        "chiptune",
+        "upbeat",
+        "racing"
+      ]
+    },
+    {
+      "id": "tension-suspense",
+      "title": "Suspense",
+      "creator": "wipics",
+      "path": "music/tension-suspense-loop.ogg",
+      "kind": "music",
+      "mood": "tension",
+      "moods": [
+        "tension"
+      ],
+      "bpm": null,
+      "duration": 24.668,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/suspense-0",
+      "download_url": "https://opengameart.org/sites/default/files/suspense_0.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/tension-suspense.json",
+      "sha256": "ca100bd0821f01590bae95044d6d9cded7a711ae8c8bec8ee8979b8c5ee29b39",
+      "original_sha256": "1b75b3eebb4a526cd7c337dc41aa5ca39d4dc0f44890a3a6c969e8edc205b8cf",
+      "transformation": "Prepared a cyclic loop by blending the final and initial 2 seconds with a linear crossfade, then concatenating the unaffected middle. Original download retained in work/asset-research.",
+      "source_loopable": false,
+      "tags": [
+        "suspense",
+        "anticipation"
+      ]
+    },
+    {
+      "id": "tension-infiltration",
+      "title": "Infiltration",
+      "creator": "Adiutorium",
+      "path": "music/tension-infiltration-loop.ogg",
+      "kind": "music",
+      "mood": "tension",
+      "moods": [
+        "tension"
+      ],
+      "bpm": null,
+      "duration": 188.276,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/infiltration",
+      "download_url": "https://opengameart.org/sites/default/files/infiltration_2.mp3",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/tension-infiltration.json",
+      "sha256": "dc4b42b24cfeccc83ce653a7c036c7ac7c6c410619fc6e7c4c0fe4d85201a7e0",
+      "original_sha256": "1dff44d34a8633e7f1df769c9c68f4e651416531bb5240654cc6889b0bf5f901",
+      "transformation": "Prepared a cyclic loop by blending the final and initial 2 seconds with a linear crossfade, then concatenating the unaffected middle. Original download retained in work/asset-research.",
+      "source_loopable": false,
+      "tags": [
+        "stealth",
+        "futuristic",
+        "sci-fi"
+      ]
+    },
+    {
+      "id": "comedy-banana",
+      "title": "Banana Track",
+      "creator": "skrjablin",
+      "path": "music/comedy-banana.ogg",
+      "kind": "music",
+      "mood": "comedy",
+      "moods": [
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 123.751,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/banana-track",
+      "download_url": "https://opengameart.org/sites/default/files/banana_track.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/comedy-banana.json",
+      "sha256": "f2d8ed7987b9083e8665661105b2d1e7d864ad92c11e53baf12d59832eb225bb",
+      "original_sha256": "f2d8ed7987b9083e8665661105b2d1e7d864ad92c11e53baf12d59832eb225bb",
+      "transformation": null,
+      "tags": [
+        "jazz",
+        "upbeat",
+        "funny"
+      ]
+    },
+    {
+      "id": "comedy-wacky",
+      "title": "Wacky Wobblings",
+      "creator": "Fupi",
+      "path": "music/comedy-wacky.ogg",
+      "kind": "music",
+      "mood": "comedy",
+      "moods": [
+        "comedy"
+      ],
+      "bpm": null,
+      "duration": 46.364,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/wacky-wobblings",
+      "download_url": "https://opengameart.org/sites/default/files/wackywobblings.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/comedy-wacky.json",
+      "sha256": "e33833cfe5276e58deb60aa705846112e1c5ab11d0e2bf4a534082c5e9f476fc",
+      "original_sha256": "e33833cfe5276e58deb60aa705846112e1c5ab11d0e2bf4a534082c5e9f476fc",
+      "transformation": null,
+      "tags": [
+        "slap-bass",
+        "swing",
+        "quirky"
+      ]
+    },
+    {
+      "id": "relaxed-lofi",
+      "title": "Lofi Hip Hop Loop",
+      "creator": "omfgdude",
+      "path": "music/relaxed-lofi.ogg",
+      "kind": "music",
+      "mood": "relaxed",
+      "moods": [
+        "relaxed"
+      ],
+      "bpm": null,
+      "duration": 127.887,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/lofi-hip-hop-loop",
+      "download_url": "https://opengameart.org/sites/default/files/LofiLoop_2.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/relaxed-lofi.json",
+      "sha256": "e57ba821d4db8d66783ca984a2778ec68d1439e862239ec36407344ef3bd1eab",
+      "original_sha256": "e57ba821d4db8d66783ca984a2778ec68d1439e862239ec36407344ef3bd1eab",
+      "transformation": null,
+      "tags": [
+        "lo-fi",
+        "hip-hop"
+      ]
+    },
+    {
+      "id": "relaxed-heavenly",
+      "title": "Heavenly Loop",
+      "creator": "isaiah658",
+      "path": "music/relaxed-heavenly.ogg",
+      "kind": "music",
+      "mood": "relaxed",
+      "moods": [
+        "relaxed"
+      ],
+      "bpm": null,
+      "duration": 33.652,
+      "loopable": true,
+      "loop_strategy": "seamless",
+      "source_url": "https://opengameart.org/content/heavenly-loop",
+      "download_url": "https://opengameart.org/sites/default/files/Heavenly%20Loop_0.ogg",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "license_file": "licenses/relaxed-heavenly.json",
+      "sha256": "a842e9e054019132cacc8fd352e7b31c000ebb51e0b227a2511e1bccb4eb166e",
+      "original_sha256": "a842e9e054019132cacc8fd352e7b31c000ebb51e0b227a2511e1bccb4eb166e",
+      "transformation": null,
+      "tags": [
+        "ambient",
+        "dreamy"
+      ]
+    }
+  ],
+  "notes": "BPM values are intentionally null until measured. Non-seamless source compositions require the indicated crossfade loop strategy."
+}

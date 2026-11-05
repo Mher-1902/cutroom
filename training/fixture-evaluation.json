@@ -1,0 +1,58 @@
+{
+  "fixture_only": true,
+  "performance_evidence": false,
+  "measurement_scope": "Saved-output structural checks; source truth and improvement require real blinded review",
+  "promotion_decision": "Human decision required; automated temporal checks do not establish source truth",
+  "adapter": {
+    "cases": 3,
+    "structural_temporal_pass_rate": 1.0,
+    "by_task": {
+      "plan": {
+        "cases": 1,
+        "passes": 1
+      },
+      "rank": {
+        "cases": 1,
+        "passes": 1
+      },
+      "select": {
+        "cases": 1,
+        "passes": 1
+      }
+    },
+    "plan_render_passes": 0,
+    "plan_renders_expected": 1,
+    "rows": [
+      {
+        "example_id": "test-plan-fixture",
+        "task": "plan",
+        "valid": true,
+        "planned_duration": 80.0,
+        "render_verified": false
+      },
+      {
+        "example_id": "test-select-fixture",
+        "task": "select",
+        "valid": true,
+        "selected": 2,
+        "temporal_recall_iou_0_5": 1.0,
+        "temporal_precision_iou_0_5": 1.0
+      },
+      {
+        "example_id": "test-rank-fixture",
+        "task": "rank",
+        "valid": true,
+        "ranked": 2,
+        "duplicates": 1,
+        "duplicate_precision": 1.0,
+        "duplicate_recall": 1.0,
+        "pairwise_rank_agreement": 1.0
+      }
+    ]
+  },
+  "selection_source_coverage": {
+    "synthetic-source-3": 1
+  },
+  "uncovered_test_sources": [],
+  "human_preference": null
+}

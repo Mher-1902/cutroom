@@ -1,0 +1,8 @@
+/* All fonts are locally bundled under OFL-1.1; see each family/OFL.txt. */
+@font-face{font-family:Fraunces;src:url("fraunces/Fraunces-Variable.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:swap}
+@font-face{font-family:Fraunces;src:url("fraunces/Fraunces-Italic-Variable.ttf") format("truetype");font-weight:100 900;font-style:italic;font-display:swap}
+@font-face{font-family:"Instrument Sans";src:url("instrumentsans/InstrumentSans-Variable.ttf") format("truetype");font-weight:400 700;font-style:normal;font-display:swap}
+@font-face{font-family:"Instrument Sans";src:url("instrumentsans/InstrumentSans-Italic-Variable.ttf") format("truetype");font-weight:400 700;font-style:italic;font-display:swap}
+@font-face{font-family:Anton;src:url("anton/Anton-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"Barlow Condensed";src:url("barlowcondensed/BarlowCondensed-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:"Barlow Condensed";src:url("barlowcondensed/BarlowCondensed-ExtraBold.ttf") format("truetype");font-weight:800;font-style:normal;font-display:swap}

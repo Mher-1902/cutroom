@@ -1,0 +1,20 @@
+{
+  "example_id": "REPLACE_WITH_HELD_OUT_CASE_ID",
+  "origin": "REPLACE_WITH_HUMAN_AFTER_ACTUAL_REVIEW",
+  "reviewer": null,
+  "blinded": false,
+  "winner": null,
+  "baseline": {
+    "claims_supported": null,
+    "timings_verified": null,
+    "setup_payoff_complete": null,
+    "duplicate_free": null
+  },
+  "adapter": {
+    "claims_supported": null,
+    "timings_verified": null,
+    "setup_payoff_complete": null,
+    "duplicate_free": null
+  },
+  "notes": null
+}
