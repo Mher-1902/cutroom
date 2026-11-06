@@ -64,8 +64,17 @@ class Studio:
 
     def update(self, job, **fields):
         with self.lock:
+            now=time.time()
+            old_status,old_stage=job.get('status'),job.get('stage')
+            next_status,next_stage=fields.get('status',old_status),fields.get('stage',old_stage)
+            if next_status!=old_status or next_stage!=old_stage:
+                started=job.get('stage_started')
+                if old_status=='running' and started is not None:
+                    times=job.setdefault('stage_seconds',{})
+                    times[old_stage]=round(times.get(old_stage,0)+max(0,now-started),3)
+                job['stage_started']=now if next_status=='running' else None
             job.update(fields)
-            job["updated"] = time.time()
+            job["updated"] = now
             self.save(job)
 
     def event(self, job, message):
@@ -96,20 +105,20 @@ class Studio:
             raise ValueError('Finish local setup before starting a project.')
         config = core.settings(raw)
         version = int(raw.get("pipeline_version", 2))
+        if version == 1:
+            raise ValueError("Legacy projects remain playable. New generation uses the v2 local engine.")
         if version not in {1, 2}:
             raise ValueError("Unknown pipeline version")
         if version == 2:
-            config["min_duration"]=max(61,config["min_duration"])
-            if config["max_duration"]<config["min_duration"]:
-                raise ValueError("Every new short must be over 60 seconds. Choose a range from 61–120 seconds.")
             chosen = runtime.profile(self.data)
             config.update(model=chosen["director"], judge_model=runtime.VISION_MODEL,
-                          content_mode=raw.get("content_mode", "auto"), editing_style="adaptive", quality_profile="quality")
+                          content_mode=raw.get("content_mode", "auto"), editing_style="adaptive", quality_profile="quality",
+                          video_encoder="auto")
             config["source_origin"]=raw.get("source_origin","unknown")
             if config["source_origin"] not in {"own_original","licensed","third_party","unknown"}:
                 raise ValueError("Unknown source provenance")
             config["rewards_eligibility"]="not_verified"
-            if config["content_mode"] not in {"auto", "creator", "gameplay", "reaction", "challenge"}:
+            if config["content_mode"] not in {"auto", "creator", "gameplay", "reaction", "challenge", "conversation", "tutorial", "story", "mixed"}:
                 raise ValueError("Unknown content mode")
             if raw.get("youtube_auth"):
                 from .source_media import auth_arguments
@@ -222,13 +231,17 @@ class Studio:
         if job.get("pipeline_version",1) == 2:
             from .pipeline_v2 import pipeline
             return pipeline(self,job)
-        return self.legacy_pipeline(job)
+        raise ValueError("Legacy projects remain playable; generation now uses the v2 engine.")
 
     def resume(self, ident):
         with self.lock:
             job = self.jobs.get(ident)
             if not job or job["status"] not in {"failed","cancelled","interrupted"}:
                 raise ValueError("Only an interrupted, failed or cancelled run can be resumed.")
+            if job.get("pipeline_version",1) != 2:
+                raise ValueError("Legacy projects remain playable. Start a v2 project for new generation.")
+            if not runtime.health(self.data)["ready"]:
+                raise ValueError("Finish the vLLM Metal setup before resuming generation. Saved progress is preserved.")
             self.cancel_flags[ident] = threading.Event()
             self.update(job,status="queued",stage="Queued to resume",error=None)
             self.queue.put(ident)
@@ -241,6 +254,8 @@ class Studio:
                 raise ValueError("Open a finished v2 project to refine a clip.")
             if not any(c.get("id")==clip_id for c in job["clips"]):
                 raise ValueError("Clip not found")
+            if not runtime.health(self.data)["ready"]:
+                raise ValueError("Finish the vLLM Metal setup before refining. Your current export is preserved.")
             notes=str(notes).strip()[:1500]
             if not notes:
                 raise ValueError("Describe the change you want.")
@@ -393,4 +408,4 @@ class Studio:
                         os.killpg(process.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
-        local_models.stop_server()
+        runtime.unload()

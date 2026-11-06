@@ -15,6 +15,39 @@ def plan(spans=None):
                               'focus':[0,0,1,1],'music_mood':'none','layout':'fit'},100,minimum=30).to_dict()
 
 class TimelineTests(unittest.TestCase):
+    def test_automatic_treatment_can_differ_for_conversation_and_challenge(self):
+        base={'spans':[{'start':10,'end':80}],'layout':'crop','focus':[.3,0,.3,1]}
+        talk=ClipEditPlan.parse({**base,'caption_style':'clean','music_mood':'none',
+            'editing_strategy':{'content_type':'conversation','pacing':'patient','reason':'Preserve the complete explanation.'}},100).to_dict()
+        challenge=ClipEditPlan.parse({**base,'caption_style':'kinetic','music_mood':'tension',
+            'editing_strategy':{'content_type':'challenge','pacing':'varied','reason':'Keep the attempt and outcome.'}},100).to_dict()
+        speech=[{'start':12,'end':14,'text':'one careful step','words':[{'start':12,'end':12.5,'text':'one'},
+            {'start':12.5,'end':13,'text':'careful'},{'start':13,'end':14,'text':'step'}]}]
+        quiet=render_v2.make_ass(talk,speech,{'blocks':[]},style='auto')[0]
+        animated=render_v2.make_ass(challenge,speech,{'blocks':[]},style='auto')[0]
+        self.assertNotIn('\\fscx96',quiet);self.assertIn('\\fscx96',animated)
+        with self.assertRaises(ValueError):ClipEditPlan.parse({**base,'editing_strategy':{'content_type':'invented','pacing':'brisk'}},100)
+
+    def test_framing_repair_keeps_unaffected_portrait_shots(self):
+        edit=plan([{'start':10,'end':30,'layout':'crop','focus':[.3,0,.3,1]},
+                   {'start':30,'end':50,'layout':'crop','focus':[.2,0,.3,1]}])
+        fixed=director.apply_revision_actions(edit,{'problems':[{'action':'fit_frame','at':25}]})
+        self.assertEqual(fixed['spans'][0]['layout'],'crop');self.assertEqual(fixed['spans'][1]['layout'],'fit')
+        self.assertEqual(fixed['mapping'],edit['mapping'])
+
+    def test_shot_framing_is_bounded_and_reviewer_can_restore_wide_action(self):
+        edit=plan([{'start':10,'end':30,'layout':'crop','focus':[.3,0,.3,1]},
+                   {'start':30,'end':50,'layout':'fit'}])
+        self.assertEqual(edit['spans'][0]['focus'],[.3,0,.3,1])
+        self.assertEqual(edit['mapping'][0]['out_end'],20)
+        crop=render_v2.layout_filter('[in]','[out]',edit,720,1280,{'mode':'challenge','blocks':[]},edit['spans'][0],{'width':1920,'height':1080})
+        wide=render_v2.layout_filter('[in]','[out]',edit,720,1280,{'mode':'challenge','blocks':[]},edit['spans'][1],{'width':1920,'height':1080})
+        self.assertNotIn('boxblur',crop);self.assertIn('boxblur',wide)
+        fixed=director.apply_revision_actions(edit,{'problems':[{'action':'fit_frame'}]})
+        self.assertTrue(all('layout' not in s and 'focus' not in s for s in fixed['spans']))
+        for bad in ({'layout':'split'},{'focus':[.8,0,.5,1]}):
+            with self.assertRaises(ValueError):plan([{'start':10,'end':50,**bad}])
+
     def test_cut_speed_freeze_replay_captions(self):
         edit=plan([{'start':10,'end':30,'speed':1.25},
                    {'kind':'freeze','start':30,'end':30,'duration':1},
@@ -81,6 +114,23 @@ class TimelineTests(unittest.TestCase):
         self.assertIn('hello',render_v2.srt(remap_words(segments,edit)))
 
 class ImportTests(unittest.TestCase):
+    def test_short_duration_presets_survive_planning_and_export_checks(self):
+        for low,high,length in [(15,29,25),(30,59,45),(61,120,72)]:
+            with self.subTest(low=low):
+                config=core.settings({'min_duration':low,'max_duration':high})
+                edit=ClipEditPlan.parse({'spans':[{'start':0,'end':length}]},180,low,high).to_dict()
+                self.assertEqual(edit['duration'],length)
+                class Studio:
+                    def run(self,job,args,**kwargs):
+                        if '-show_format' in args:
+                            return json.dumps({'format':{'duration':length},'streams':[{'codec_type':'video','width':720,'height':1280},{'codec_type':'audio'}]})
+                        return '{"input_i":"-16","input_tp":"-2"}'
+                with patch('cutroom.render_v2.local_models.binary',return_value='tool'):
+                    qc=render_v2.technical_qc(Studio(),{'config':config},Path('clip.mp4'),length,720)
+                    wrong=render_v2.technical_qc(Studio(),{'config':{**config,'min_duration':100,'max_duration':120}},Path('clip.mp4'),length,720)
+                self.assertTrue(qc['passed'],qc)
+                self.assertFalse(wrong['passed'])
+
     def test_timestamp_hint_never_trims_source(self):
         url,hint=source_media.normalize_url('https://www.youtube.com/watch?v=_c2e1NcI3Sc&t=20m21s')
         self.assertEqual(url,'https://www.youtube.com/watch?v=_c2e1NcI3Sc');self.assertEqual(hint,1221)
@@ -101,7 +151,8 @@ class ImportTests(unittest.TestCase):
         self.assertGreater(core.settings({})['min_duration'],60)
         with tempfile.TemporaryDirectory() as d:
             self.assertFalse(runtime.profile(d)['verified'])
-            self.assertNotIn('4b',runtime.profile(d)['director'])
+            self.assertNotRegex(runtime.profile(d)['director'],r'(?i)(?:^|[-:/])4b(?:[-:/]|$)')
+            self.assertRegex(runtime.profile(d)['director'],r'(?i)14b')
 
 class CaptionImportTests(unittest.TestCase):
     def test_duplicate_styling_and_zero_width_characters_are_removed(self):

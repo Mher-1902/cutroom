@@ -1,6 +1,6 @@
 # Cutroom v2
 
-A personal Mac studio for turning a YouTube link or uploaded video into up to ten reviewed vertical shorts. New clips are **61–120 seconds** by default and must exceed 60 seconds at export. A shorter or weaker source can produce fewer qualifying clips. The Bordeaux/cream interface uses locally bundled Fraunces and Instrument Sans.
+A personal Mac studio for turning a YouTube link or uploaded video into up to ten reviewed vertical shorts. New clips default to **61–120 seconds**. A separate prominent length selector offers **15–29 seconds**, **30–59 seconds**, and a custom range within **15–180 seconds**. Exports must match the selected range; only a selection above one minute enforces >60 seconds. A shorter or weaker source can produce fewer qualifying clips. The Bordeaux/cream interface uses locally bundled Fraunces and Instrument Sans.
 
 ## Run
 
@@ -18,27 +18,27 @@ From a terminal in this project folder:
 
 Use `--keep-awake` on power for long runs. It allows the display to sleep, but does not override closing the laptop lid or manually choosing Sleep. After rebooting, run Start again. See [RUNNING.md](RUNNING.md) for startup, access, and hosting details.
 
-For a new installation, first run **Install.command**. It installs free Homebrew tools: `ffmpeg-full`, `whisper-cpp`, `yt-dlp`, `ollama`, and `uv`. Homebrew and Apple’s Command Line Tools must be available. Open **Inside the engine → Finish local setup** to create the app-local Python 3.12 environment, compile the macOS Vision helper and download free models. The tested dependency versions are in `requirements-v2.lock.txt`.
+For a new installation, first run **Install.command**. It installs free Homebrew tools: `ffmpeg-full`, `whisper-cpp`, `yt-dlp`, and `uv`. Homebrew and Apple’s Command Line Tools must be available. Open **Inside the engine → Finish local setup** to create the app-local Python 3.12 environment, compile the macOS Vision helper and download free models. The tested analysis dependencies are in `requirements-v2.lock.txt`; the isolated inference installer pins its release wheels and model revisions.
 
-Model downloads are large: retaining the legacy model and every tested larger profile uses roughly 50 GiB. Models, Python packages, source caches and projects stay in this app’s `data/` directory. Installation/model acquisition requires internet; inference uses an isolated loopback Ollama endpoint at `127.0.0.1:11439`, with cloud execution disabled. The normal Ollama service on port 11434 is not used.
+Model downloads are large: retaining the legacy model and every tested larger profile uses roughly 50 GiB. Models, Python packages, source caches and projects stay in this app’s `data/` directory. Installation/model acquisition requires internet; generative inference uses an owned vLLM Metal server at `127.0.0.1:11440`. No Ollama or paid API fallback runs. The analysis environment and the vLLM environment are separate.
 
-Paste a link, optionally describe the desired audience or pacing, then choose **Create 10 shorts**. **Make it yours** contains count, duration, framing, captions, soundtrack, source provenance, watermark/credit and other settings. A timestamp in a URL is an attention hint; the full source is still analyzed. Uploading an accessible original file is the fallback for restricted sources. Browser cookies are used only when you explicitly enable a supported local browser session for that import.
+Paste a link, optionally describe the desired audience or pacing, then choose **Create 10 shorts**. The prominent count selector chooses 1–10 shorts independently of the clip-length selector. **Make it yours** contains duration, framing, captions, soundtrack, source provenance, watermark/credit and other settings. A timestamp in a URL is an attention hint; the full source is still analyzed. Uploading an accessible original file is the fallback for restricted sources. Browser cookies are used only when you explicitly enable a supported local browser session for that import.
 
 ## Models and calibration
 
 - **Speech:** Whisper large-v3-turbo through whisper.cpp.
-- **Visual indexing and draft inspection:** local Qwen3.5 9B Q4_K_M.
-- **Director and story critic:** test Qwen3.5 27B Q4_K_M, then Q3_K_M; use Qwen3 14B if both larger quantizations fail.
+- **Visual indexing and draft inspection:** native MLX Qwen3.5 9B, four-bit weights, through vLLM Metal.
+- **Director and story critic:** native MLX Qwen3 14B, four-bit weights, through vLLM Metal. Earlier 27B Q4/Q3 trials exceeded the additional-swap gate. Their failures remain in the local history.
 - **Alignment:** local WhisperX forced alignment on selected excerpts, with clearly logged fallback to Whisper timing when unavailable.
 - **Other evidence:** native macOS Vision faces/OCR, local AudioSet AST sound-event classification, and PySceneDetect boundaries.
 
-A download alone never verifies a profile. Calibration runs sustained real-source structured-output requests for at least ten minutes and records process memory, system pressure, swap growth, Metal allocation and inference timings. The gates are process RSS below 19 GiB, no critical pressure, less than 1 GiB additional swap, valid structured output and verified GPU use. Failed fit trials are preserved; interrupted tests can be retried. No automatic fallback to the legacy 4B model is permitted.
+A download alone never verifies a profile. Calibration runs sustained real-source structured-output requests for at least ten minutes and records process-tree RSS, Darwin physical footprint, system pressure, swap growth, GPU selection and inference timings. Separate GPU allocation is not available from this runtime. The gates are process memory below 19 GiB, no critical pressure, less than 1 GiB additional swap, valid structured output and verified GPU use. Failed fit trials are preserved; interrupted tests can be retried. No automatic fallback to the legacy 4B model is permitted.
 
-The runtime benchmark chooses from explicit source-window IDs, avoiding invented benchmark timestamps. This verifies fit and structured response handling; it is not proof of editorial judgment. Actual selection and edit plans have separate boundary, duration and source-context validation. Calibration details are visible in **Inside the engine**, and saved in `data/models/profile-v2.json`.
+The runtime benchmark chooses from explicit source-window IDs, avoiding invented benchmark timestamps. This verifies fit and structured response handling; it is not proof of editorial judgment. Actual selection and edit plans have separate boundary, duration and source-context validation. Calibration details are visible in **Inside the engine**, and saved in `data/models/profile-vllm-v1.json`. The previous-engine profile is retained separately.
 
 ## Editing workflow
 
-1. Import the original-language audio and video, transcribe speech, and map the complete timeline. Inspect one source frame per second in timestamped sequences; use denser four-frame-per-second sequences around candidate reveals and reactions.
+1. Import the original-language audio and video, transcribe speech, and map the complete timeline. Map the whole source in 60-second broad windows, combining uniform visual samples with scene/sound cues and full speech. Selected candidates receive denser inspection around setup, reveals and reactions. Brief events between samples can still be missed.
 2. Combine visual observations, speech, scene changes, faces/text and sound cues. Find up to forty distinct candidate events across the full video, with enough context for a complete challenge, reaction or gameplay beat. Exclude sponsor material and repeated outcomes.
 3. Direct a validated edit: chronological source sections, optional replay/freeze beats, framing, timed punch-ins, captions, hook/callouts, music mood and SFX. Maintain source-to-output mapping through cuts, speed changes and replays.
 4. Render a draft. Inspect image sequences, actual mapped speech and audio/technical measurements with the vision critic and a separate story-critic request. Revise specific weaknesses, allowing two automatic revision rounds.
@@ -46,7 +46,7 @@ The runtime benchmark chooses from explicit source-window IDs, avoiding invented
 
 The director and story critic are separate requests using the selected director weights; they are not statistically independent judges. Visual critique uses the separate 9B model. Models can misread footage, captions and context. Human viewing remains necessary before publishing.
 
-Framing supports subject-aware crops, an actual gameplay/facecam split and a full-frame blurred-backdrop fallback. Cropping falls back when it would lose wide action. Existing readable source captions are detected with visual/OCR evidence so generated speech captions can be suppressed during overlap. Captions use bundled Barlow Condensed and Anton. Source-language coverage depends on transcription, alignment and available font glyphs; the app does not translate dialogue.
+Framing supports subject-aware crops, an actual gameplay/facecam split and a full-frame blurred-backdrop fallback. Each source span can choose its own crop or fit treatment, so close-ups can fill the portrait frame while wide shots retain important action. The director and critic use a source-grounded [editorial brief](docs/editorial-reference.md) for clearer openings, earned payoffs, readable text and deliberate effects. Cropping falls back when it would lose wide action. Existing readable source captions are detected with visual/OCR evidence so generated speech captions can be suppressed during overlap. Captions use bundled Barlow Condensed and Anton. Source-language coverage depends on transcription, alignment and available font glyphs; the app does not translate dialogue.
 
 Finishing uses locally bundled CC0 music and sound effects, speech normalization, music ducking, a final limiter and measured true-peak checks. The local catalog records source URLs, SHA-256 hashes and licenses. It covers action, tension, comedy and relaxed moods. A watermark or credit can be positioned in any corner with adjustable opacity; it is a branding/attribution feature and conveys no rights or monetization approval.
 
@@ -68,11 +68,13 @@ A [source-backed platform review for a Latvian resident](docs/platform-monetizat
 
 ## Verification
 
-The Mac is an Apple M5 with 10 CPU cores, 10 GPU cores and 24 GiB unified memory. The 27B Q4 and Q3 fit tests exceeded the additional-swap gate; their failures are retained. Qwen3 14.8B Q4_K_M passed a 624.4-second sustained test with 22 valid responses, 8.39 GiB peak process RSS, Metal acceleration and no additional swap. The complete real-footage acceptance run must still finish before v2 is described as ready. See the live model profile and `VERIFICATION.md` for the measured status.
+The Mac is an Apple M5 with 10 CPU cores, 10 GPU cores and 24 GiB unified memory. The current 14B vLLM Metal director passed a 607.9-second sustained test with 28 valid source-window responses, 9.99 GiB peak process-tree physical footprint, verified GPU use and 0.519 GiB additional swap. A fresh two-window 9B vision batch took 44.1 seconds plus 23.9 seconds to load the model, within memory gates. These tests establish runtime behavior, not selection quality.
 
-The previous v1 pipeline passed a synthetic narration demonstration. That result does not validate the new multimodal pipeline. Current v2 unit checks cover time mapping, replays, speed changes, context trimming, source-caption overlap, source authentication consent, original audio choice, truncated-audio recovery, repeated refinement generations and watermark escaping. Real FFmpeg graph smoke checks exercised all layouts, music/ducking, SFX, freezes, replays and zooms.
+The approved 71.72-second portrait style preview passed technical checks. The same 1080×1920 edit encoded in 14.4 seconds with VideoToolbox versus 45.9 seconds with libx264; frame comparison averaged 0.9961 SSIM. Hardware encoding activates only with a verified local renderer profile and falls back to CPU if encoding fails.
 
-For a 20–30-minute source on this Mac, budget a provisional **4–8 hours** at the current quality settings. This is an estimate from individual stage measurements, not a measured end-to-end average. Full visual indexing alone takes approximately 1½–2 hours for 22 minutes. Candidate count and revision rounds can increase the total; checkpoints can reduce repeated work. A real 72.1-second renderer preview passed technical checks, but was manually selected and is not evidence of completed autonomous selection.
+The complete autonomous real-footage run is still being validated. The old four-hour analysis projection came from 300 serial 12-second windows per source hour. The new broad map uses 60 windows per hour, with additional inspection on selected events. Do not reuse the old estimate as the new runtime's measured completion time. See [inference measurements](docs/inference-efficiency.md) and [acceptance status](VERIFICATION.md). Under one hour is a target, not a measured guarantee; downloads, selected clip count and revision rounds matter.
+
+The previous v1 pipeline passed a synthetic narration demonstration. Current source checks cover timestamp mapping, replays, speed changes, framing, adaptive styles, source captions, imports, checkpointing, launch identity and audio-clock recovery. These checks and manually selected previews are not substitutes for a completed AI production run.
 
 Fine-tuning preparation is available in [training/README.md](training/README.md) and the [proposal](docs/fine-tuning.md). No adapter has been trained and no quality improvement is claimed.
 

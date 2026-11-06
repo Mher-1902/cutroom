@@ -199,17 +199,19 @@ def main():
         fcntl.flock(instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print("Cutroom is already running. Open http://127.0.0.1:8765", flush=True)
+        instance_lock.close()
         return
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as exc:
         print(f"Cannot open port {args.port}: {exc}", flush=True)
+        instance_lock.close()
         return
     STUDIO = Studio(ROOT)
     server.daemon_threads = True
     atexit.register(STUDIO.close)
     try:
-        local_models.start_server(STUDIO.data)
+        runtime.initialize(STUDIO.data)
     except (RuntimeError, OSError) as exc:
         print("Model setup: " + str(exc), flush=True)
     url = f"http://127.0.0.1:{args.port}"
@@ -226,6 +228,7 @@ def main():
     finally:
         server.server_close()
         STUDIO.close()
+        instance_lock.close()
 
 
 if __name__ == "__main__":

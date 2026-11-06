@@ -48,6 +48,7 @@ def package(studio,job,folder,states,index):
             for asset in json.loads(path.read_text()).get('assets',[]):
                 used[asset['id']]=asset
     report={"pipeline_version":2,"source":job.get("source_metadata",job["source"]),"config":{k:v for k,v in job["config"].items() if k!="youtube_auth"},
+            "measured_stage_seconds":job.get('stage_seconds',{}),
             "models":runtime.profile(studio.data),"rubric_weights":REVIEW_WEIGHTS,
             "score_note":"Editorial quality out of 100. Future views are uncertain.",
             "originality":{"declared_source_origin":job["config"].get("source_origin","unknown"),
@@ -84,8 +85,11 @@ def package(studio,job,folder,states,index):
     studio.update(job,archive=f"/files/{job['id']}/clips.zip",report=f"/files/{job['id']}/analysis.json")
 
 
-def evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candidate,original_segments,final=False):
+def evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candidate,original_segments,final=False,story_reuse=None):
     record=render_v2.render(studio,job,source,plan,aligned,index,metadata,folder,revision,final)
+    preview={'video':f"/files/{job['id']}/{record['path'].name}",'title':plan.get('title','Current edit'),
+             'duration':plan['duration'],'revision':revision,'candidate_id':plan.get('id'),'final':final,'reviewing':True}
+    if studio is not None:studio.update(job,latest_draft=preview)
     width=job["config"]["resolution"] if final else 720
     technical=render_v2.technical_qc(studio,job,record["path"],plan["duration"],width)
     cache=folder/(record["path"].stem+".review.json")
@@ -98,9 +102,15 @@ def evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candi
         spoken=analysis.compact_speech(record['mapped'],0,plan['duration'])
         context=review_context(candidate,index,original_segments)
         visual=director.critique(studio,job,plan,images,spoken,technical,context)
-        story=director.story_review(studio,job,plan,spoken,context)
+        reusable=bool(story_reuse and story_reuse['mapped']==record['mapped'] and story_reuse.get('plan')==plan)
+        if reusable:
+            story=deepcopy(story_reuse['story'])
+        else:
+            story=director.story_review(studio,job,plan,spoken,context)
         review=combined_review(visual,story,technical)
+        review['story_review_reused']=reusable
         runtime.atomic_json(cache,review)
+    if studio is not None:studio.update(job,latest_draft={**preview,'reviewing':False,'score':review['score'],'rejected':review['reject']})
     return record,review
 
 
@@ -115,8 +125,53 @@ def checkpoint_candidate(folder,ident,state):
     runtime.atomic_json(path,states)
 
 
+def prepare_initial_pool(studio,job,source,candidates,index,segments,metadata,folder,states):
+    """Keep the vision model resident, then the director, for the initial pool.
+
+    Per-clip review/refinement still uses its normal checkpoints. Backfill can
+    prepare additional candidates on demand rather than editing all forty.
+    """
+    needed=max(0,job['config']['count']-len(job['clips']))
+    needed=min(3,needed)
+    chosen=[]
+    for candidate in candidates:
+        state=states.setdefault(candidate['id'],{'candidate':candidate,'status':'pending','revisions':[]})
+        if state['status'] in {'qualified','rejected','duplicate'}:continue
+        chosen.append((candidate,state))
+        if len(chosen)>=needed:break
+    if not chosen or not needed:return
+    studio.update(job,stage='Inspecting selected moments')
+    for candidate,state in chosen:
+        studio.check_cancel(job['id'])
+        analysis.densify_regions(studio,job,folder,candidate,index)
+        candidate['fine_evidence']=state.get('candidate',{}).get('fine_evidence') or candidate.get('fine_evidence')
+        if not candidate['fine_evidence']:
+            studio.event(job,'Inspecting the event before editing: '+candidate['title'])
+            candidate['fine_evidence']=analysis.inspect_candidate(studio,job,source,candidate,index,folder)
+        state['candidate']=candidate
+        runtime.atomic_json(folder/'candidate-progress.json',states)
+    runtime.unload()
+    studio.update(job,stage='Directing selected edits')
+    for candidate,state in chosen:
+        studio.check_cancel(job['id'])
+        path=folder/f"plan-{candidate['id']}-r0.json"
+        if path.exists():continue
+        aligned=analysis.align_candidate(studio,job,folder,folder/'speech.wav',segments,candidate,index['language'])
+        try:
+            plan=director.make_plan(studio,job,candidate,index,aligned,previous=state.get('latest_plan'))
+            runtime.atomic_json(path,plan)
+            state['latest_plan']=plan
+        except RuntimeError as exc:
+            if not str(exc).startswith('Director could not produce'):raise
+            state.update(status='rejected',error=str(exc))
+            studio.event(job,str(exc))
+        runtime.atomic_json(folder/'candidate-progress.json',states)
+    runtime.unload()
+
+
 def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,state,user_notes=None,starting_revision=0):
     ident=candidate["id"]
+    analysis.densify_regions(studio,job,folder,candidate,index)
     if not candidate.get("fine_evidence"):
         studio.event(job,"Inspecting the reveal and reaction more closely: "+candidate["title"])
         candidate["fine_evidence"]=analysis.inspect_candidate(studio,job,source,candidate,index,folder)
@@ -153,7 +208,8 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
         if qualified(review,job["config"]):
             studio.event(job,"Draft passed. Rendering the full-resolution export: "+plan["title"])
             runtime.unload()
-            final,final_review=evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candidate,segments,final=True)
+            final,final_review=evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candidate,segments,final=True,
+                story_reuse={'mapped':draft['mapped'],'story':review['story_critic'],'plan':deepcopy(plan)})
             if qualified(final_review,job["config"]):
                 cover=folder/(final["path"].stem+".jpg")
                 if not cover.exists():
@@ -190,7 +246,7 @@ def pipeline(studio,job):
     job["source_file"]=str(source)
     metadata=analysis.inspect_source(source,lambda args:studio.run(job,args))
     if metadata['duration']<job['config']['min_duration']:
-        raise ValueError('The source is shorter than the requested minimum. New shorts need more than 60 seconds of source material; short events are not padded to qualify.')
+        raise ValueError('The source is shorter than the chosen minimum clip length. Choose a shorter duration or a longer source; short events are not padded.')
     studio.update(job,metadata=metadata,progress=7,stage="Transcribing")
     runtime.unload()
     segments,language=analysis.transcribe(studio,job,source,folder,metadata)
@@ -207,6 +263,7 @@ def pipeline(studio,job):
                                  lambda message:studio.event(job,message),
                                  cancelled=lambda:studio.cancel_flags[job["id"]].is_set(),key=job["id"])
     job["config"].update(model=chosen["director"],judge_model=runtime.VISION_MODEL)
+    job['config'].setdefault('video_encoder','auto')
     studio.update(job,stage="Analyzing full video",progress=18)
     index=analysis.build_index(studio,job,source,folder,metadata,segments,language)
     if job["config"].get("content_mode")!="auto":
@@ -215,6 +272,7 @@ def pipeline(studio,job):
     candidates=director.propose(studio,job,index,segments,folder)
     states_path=folder/"candidate-progress.json"
     states=json.loads(states_path.read_text()) if states_path.exists() else {}
+    prepare_initial_pool(studio,job,source,candidates,index,segments,metadata,folder,states)
     studio.update(job,candidate_count=len(candidates),stage="Editing & reviewing",progress=50)
     for position,candidate in enumerate(candidates):
         studio.check_cancel(job["id"])
@@ -223,8 +281,12 @@ def pipeline(studio,job):
         state=states.setdefault(candidate["id"],{"candidate":candidate,"status":"pending","revisions":[]})
         if state["status"] in {"qualified","rejected","duplicate"}:
             continue
-        if any(core.overlap_fraction(candidate,clip)>.20 for clip in job["clips"]):
-            state["status"]="duplicate"
+        if not (folder/f"plan-{candidate['id']}-r0.json").exists():
+            prepare_initial_pool(studio,job,source,candidates[position:],index,segments,metadata,folder,states)
+            if state['status']=='rejected':continue
+        planned=json.loads((folder/f"plan-{candidate['id']}-r0.json").read_text())
+        if any(core.overlap_fraction(planned,clip)>.20 for clip in job['clips']):
+            state['status']='duplicate'
             runtime.atomic_json(states_path,states)
             continue
         try:

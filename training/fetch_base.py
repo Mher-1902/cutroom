@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-from common import ROOT, require
+from common import ROOT, require, runtime_model_specs
 
 
 def main():
@@ -15,10 +15,10 @@ def main():
     require(args.download, "Use --download explicitly after dataset readiness; nothing was fetched")
     destination = ROOT / "base-qwen3-14b-4bit"
     require(not destination.exists(), "Refusing to change an existing base snapshot")
-    from huggingface_hub import HfApi, snapshot_download
     repo = "mlx-community/Qwen3-14B-4bit"
-    revision = HfApi().model_info(repo).sha
-    require(isinstance(revision, str) and len(revision) == 40, "Cannot resolve immutable model revision")
+    revision = runtime_model_specs()[repo]["revision"]
+    require(isinstance(revision, str) and len(revision) == 40, "Missing app-pinned immutable model revision")
+    from huggingface_hub import snapshot_download
     snapshot_download(repo, revision=revision, local_dir=str(destination), cache_dir=str(ROOT / "hf-cache"),
                       allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model", "*.jinja", "README.md", "LICENSE*"])
     (ROOT / "base-snapshot.json").write_text(json.dumps(

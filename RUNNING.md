@@ -45,4 +45,4 @@ An internet-hosted multi-user version needs authentication, isolation, persisten
 
 ## Current test status
 
-The interface, local models, renderer, checkpoint system, and source import are available to test. A real 72.1-second manually selected renderer preview passed technical checks. The full autonomous reference-video run remains in progress; no promise of ten qualifying results, virality, rights clearance, or platform payouts is made. See [VERIFICATION.md](VERIFICATION.md).
+The interface, local models, renderer, checkpoint system, and source import are available to test. The user approved the 71.72-second portrait editing preview. Native vLLM Metal model calibration and hardware rendering passed their measured checks. The full autonomous reference-video run remains in progress; no promise of ten qualifying results, virality, rights clearance, or platform payouts is made. See [VERIFICATION.md](VERIFICATION.md).

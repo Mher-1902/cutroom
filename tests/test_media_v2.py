@@ -24,5 +24,9 @@ class ContainerClockTests(unittest.TestCase):
             self.assertLess(float(clocks['format']['start_time']),.1)
             video=next(s for s in clocks['streams'] if s['codec_type']=='video')
             self.assertEqual(int(video['nb_read_frames']),100)
-            self.assertEqual(json.loads((folder/'normalization.json').read_text())['original_container_start'],15)
+            source_clock=json.loads(studio.run({},[local_models.binary('ffprobe'),'-v','error','-show_entries','format=start_time','-of','json',str(source)]))
+            # AAC encoder priming differs between FFmpeg builds. Record the
+            # actual container clock while retaining every source video frame.
+            self.assertAlmostEqual(float(source_clock['format']['start_time']),15,delta=.1)
+            self.assertEqual(json.loads((folder/'normalization.json').read_text())['original_container_start'],float(source_clock['format']['start_time']))
             self.assertEqual(analysis.normalize_source(studio,{},source,folder),normalized)

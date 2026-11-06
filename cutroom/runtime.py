@@ -3,6 +3,7 @@ import base64
 import fcntl
 from functools import lru_cache
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 from pathlib import Path
@@ -14,11 +15,11 @@ import threading
 import time
 import urllib.request
 
-from . import local_models
+from . import local_models, vllm_backend
 
-VISION_MODEL = "qwen3.5:9b-q4_K_M"
-DIRECTORS = ["qwen3.5:27b-q4_K_M", "hf.co/unsloth/Qwen3.5-27B-GGUF:Q3_K_M", "qwen3:14b"]
-PROFILE_NAME = "profile-v2.json"
+VISION_MODEL = "mlx-community/Qwen3.5-9B-MLX-4bit"
+DIRECTORS = ["mlx-community/Qwen3-14B-4bit"]
+PROFILE_NAME = "profile-vllm-v1.json"
 inference_lock = threading.RLock()
 _active_lock = threading.Lock()
 _active_responses = {}
@@ -45,6 +46,7 @@ def atomic_json(path, value):
 
 
 def profile(data):
+    vllm_backend.configure(data)
     path = Path(data) / "models" / PROFILE_NAME
     if path.exists():
         try:
@@ -52,120 +54,140 @@ def profile(data):
         except ValueError:
             pass
     return {"verified": False, "director": DIRECTORS[0], "vision": VISION_MODEL,
-            "message": "Larger models need calibration before the quality profile can run."}
+            "message": "The vLLM Metal quality profile needs a fresh runtime and memory benchmark."}
+
+
+def initialize(data):
+    vllm_backend.configure(data)
 
 
 def health(data):
-    result = local_models.health(data)
+    initialize(data)
     chosen = profile(data)
     data = Path(data)
-    environment = data / "venv" / "bin" / "python"
-    result.update(profile=chosen,hardware=hardware(), turbo=(data / "models" / "ggml-large-v3-turbo.bin").is_file(),
-                  native=(data / "bin" / "vision-probe").is_file(),
-                  environment=environment.is_file() and (data / "environment-v2.json").is_file(),
-                  audio_model=(data/'audio-model-ready.json').is_file(),
-                  audio_library=(data.parent/'assets/audio/manifest.json').is_file(),
-                  default_model=chosen["director"], default_vision=VISION_MODEL)
-    result["legacy_ready"] = result["ready"]
-    calibrated_or_available = chosen.get("verified") or any(m in result["models"] for m in DIRECTORS)
-    result["ready"] = bool(all(result["tools"].values()) and result["captions"] and result["online"]
-                           and result["turbo"] and result["native"] and result["environment"]
-                           and result['audio_model'] and result['audio_library']
-                           and calibrated_or_available
-                           and VISION_MODEL in result["models"])
-    result["calibration_pending"] = not chosen.get("verified")
-    bootstrap = data / "bootstrap-v2.json"
+    tools = {name: bool(local_models.binary(name)) for name in ("ffmpeg", "ffprobe", "whisper-cli", "yt-dlp")}
+    models = vllm_backend.model_names()
+    available = vllm_backend.installed()
+    result = {"runtime": "vllm-metal", "tools": tools, "online": available, "models": models,
+              "profile": chosen, "hardware": hardware(), "endpoint": vllm_backend.BASE_URL,
+              "turbo": (data / "models/ggml-large-v3-turbo.bin").is_file(),
+              "native": (data / "bin/vision-probe").is_file(),
+              "environment": (data / "environment-v2.json").is_file(),
+              "audio_model": (data / "audio-model-ready.json").is_file(),
+              "audio_library": (data.parent / "assets/audio/manifest.json").is_file(),
+              "captions": local_models.subtitles_supported(local_models.binary("ffmpeg")),
+              "default_model": chosen["director"], "default_vision": VISION_MODEL,
+              "legacy_ready": False, "calibration_pending": not chosen.get("verified"), "downloads": None}
+    result["ready"] = bool(all(tools.values()) and available and all(result[k] for k in
+        ("turbo", "native", "environment", "audio_model", "audio_library", "captions"))
+        and VISION_MODEL in models and chosen["director"] in models)
+    result["migration_in_progress"] = False
     try:
-        result["downloads"] = json.loads(bootstrap.read_text()) if bootstrap.exists() else None
-    except ValueError:
-        result["downloads"] = None
+        preparation = json.loads((data / "native-setup-active.json").read_text())
+        for pid in preparation.get("pids", []):
+            if isinstance(pid, int) and pid > 1:
+                try:
+                    os.kill(pid, 0)
+                    result["migration_in_progress"] = True
+                except ProcessLookupError:
+                    pass
+    except (OSError, ValueError):
+        pass
+    result['ready'] = result['ready'] and not result['migration_in_progress']
     return result
 
 
 def unload():
     global _loaded
-    for item in local_models.request("/api/ps").get("models", []):
-        local_models.request("/api/generate", {"model": item["name"], "keep_alive": 0}, timeout=60)
+    vllm_backend.stop()
     _loaded = None
-    deadline=time.time()+10
-    while local_models.request('/api/ps').get('models'):
-        if time.time()>deadline:
-            raise RuntimeError('The previous model has not released memory yet. Resume after the local runtime is idle.')
-        time.sleep(.2)
 
 
 def cancel_request(key):
     with _active_lock:
-        response = _active_responses.get(key)
-        if response:
-            try:
-                response.fp.raw._sock.shutdown(socket.SHUT_RDWR)
-            except (AttributeError,OSError):
-                pass
-            try:
-                response.close()
-            except OSError:
-                pass
+        responses=[r for k,r in _active_responses.items() if k==key or str(k).startswith(str(key)+':')]
+    for response in responses:
+        try:
+            response.fp.raw._sock.shutdown(socket.SHUT_RDWR)
+        except (AttributeError,OSError):
+            pass
+        try:
+            response.close()
+        except OSError:
+            pass
 
 
 def chat(model, system, prompt, schema, images=None, cancelled=lambda: False, key=None,
          context=None, predict=3072, metrics=None):
-    """Stream internally so cancellation and timing don't depend on one huge response."""
-    global _loaded
-    if "cloud" in model.lower() or model not in local_models.model_names():
-        raise RuntimeError(f"The requested model is not downloaded locally: {model}")
     with inference_lock:
         if cancelled():
             raise RuntimeError("Cancelled")
-        if _loaded != model:
-            unload()
-            _loaded = model
-        message = {"role": "user", "content": prompt}
-        if images:
-            message["images"] = [base64.b64encode(Path(p).read_bytes()).decode() for p in images[:4]]
-        body = {"model": model, "stream": True, "think": False, "format": schema,
-                "messages": [{"role": "system", "content": system}, message], "keep_alive": "15m",
-                "options": {"temperature": .2, "num_ctx": context or (12288 if images else 8192),
-                            "num_predict": predict, "seed": 41}}
-        req = urllib.request.Request(local_models.OLLAMA_URL + "/api/chat", data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
-        started, content, final = time.time(), [], {}
-        with urllib.request.urlopen(req, timeout=1800) as response:
+        started = time.time()
+        vllm_backend.ensure_model(model, cancelled)
+        loaded = time.time()
+        body = vllm_backend.payload(model, system, prompt, schema, images, predict)
+        def register(response):
             with _active_lock:
                 if key:
                     _active_responses[key] = response
-            try:
-                for line in response:
-                    if cancelled():
-                        raise RuntimeError("Cancelled")
-                    item = json.loads(line)
-                    if item.get("error"):
-                        raise RuntimeError(item["error"])
-                    content.append(item.get("message", {}).get("content", ""))
-                    if item.get("done"):
-                        final = item
-            finally:
-                with _active_lock:
-                    _active_responses.pop(key, None)
-        if cancelled():
-            raise RuntimeError("Cancelled")
-        text = "".join(content).strip()
-        try:
-            result = json.loads(text)
-        except ValueError as exc:
-            raise RuntimeError("The local model returned incomplete JSON. The stage can be resumed.") from exc
+        def unregister():
+            with _active_lock:
+                _active_responses.pop(key, None)
+        result, usage = vllm_backend.stream(body, cancelled, register, unregister)
+        elapsed = time.time() - started
         if metrics is not None:
-            metrics.append({"model": model, "seconds": round(time.time() - started, 2),
-                            "requested_context":body['options']['num_ctx'],"prompt_characters":len(prompt),"image_count":len(images or []),
-                            "output_tokens": final.get("eval_count"), "prompt_tokens": final.get("prompt_eval_count"),
-                            "tokens_per_second": round(final.get("eval_count", 0) / max(.01, final.get("eval_duration", 0) / 1e9), 2)})
+            metrics.append({"runtime": "vllm-metal", "model": model, "seconds": round(elapsed, 2),
+                "load_seconds": round(loaded-started, 2), "prompt_characters": len(prompt),
+                "image_count": len(images or []), "output_tokens": usage.get("completion_tokens"),
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "output_tokens_per_wall_second": round(usage.get("completion_tokens", 0) / max(.01, time.time()-loaded), 2)})
         return result
+
+
+def chat_batch(model, system, requests, cancelled=lambda:False, key=None, metrics=None, on_result=None):
+    """Two independent vision windows share one model; outputs stay separate.
+
+    The outer model lock prevents another stage unloading the weights while the
+    server batches requests. Successful items can be checkpointed immediately.
+    """
+    if not vllm_backend.MODELS[model]['vision'] or not 1<=len(requests)<=2:
+        raise ValueError('Only one or two requests for the same vision model can be batched.')
+    with inference_lock:
+        vllm_backend.ensure_model(model,cancelled)
+        def run(index,request):
+            if cancelled():raise RuntimeError('Cancelled')
+            started=time.time();request_key=f'{key}:{index}'
+            def register(response):
+                with _active_lock:_active_responses[request_key]=response
+            def unregister():
+                with _active_lock:_active_responses.pop(request_key,None)
+            body=vllm_backend.payload(model,system,request['prompt'],request['schema'],request.get('images'),request.get('predict',900))
+            result,usage=vllm_backend.stream(body,cancelled,register,unregister)
+            elapsed=time.time()-started
+            if metrics is not None:
+                metrics.append({'runtime':'vllm-metal','model':model,'seconds':round(elapsed,2),'batch_size':len(requests),
+                    'prompt_characters':len(request['prompt']),'image_count':len(request.get('images',[])),
+                    'output_tokens':usage.get('completion_tokens'),'prompt_tokens':usage.get('prompt_tokens')})
+            return result
+        results=[None]*len(requests);errors=[]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures={pool.submit(run,i,r):i for i,r in enumerate(requests)}
+            for future in as_completed(futures):
+                index=futures[future]
+                try:
+                    results[index]=future.result()
+                    if on_result:on_result(index,results[index])
+                except Exception as exc:
+                    errors.append(exc)
+        if errors:raise errors[0]
+        return results
 
 
 def memory_sample():
     def command(args):
         return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL, timeout=8).strip()
-    result = {"time": time.time(), "pressure": None, "swap_bytes": None, "rss_bytes": 0, "gpu_bytes": 0}
+    result = {"time": time.time(), "pressure": None, "swap_bytes": None, "rss_bytes": 0, "gpu_bytes": None,
+              "physical_footprint_bytes":None}
     try:
         result["pressure"] = int(command(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"]))
         swap = command(["sysctl", "vm.swapusage"])
@@ -173,12 +195,26 @@ def memory_sample():
         if match:
             result["swap_bytes"] = float(match[1]) * (1024 ** (2 if match[2] == "M" else 3))
         processes = command(["ps", "-axo", "pid=,ppid=,rss=,command="])
-        parents = set(int(v) for v in command(["lsof", "-t", "-iTCP:11439", "-sTCP:LISTEN"]).split())
+        root_pid=vllm_backend.process_id()
+        parents={root_pid} if root_pid else set()
         rows = [line.strip().split(None, 3) for line in processes.splitlines()]
         for _ in range(3):
             parents.update(int(r[0]) for r in rows if len(r) == 4 and int(r[1]) in parents)
         result["rss_bytes"] = sum(int(r[2]) * 1024 for r in rows if len(r) == 4 and int(r[0]) in parents)
-        result["gpu_bytes"] = sum(m.get("size_vram", 0) for m in local_models.request("/api/ps").get("models", []))
+        if platform.system()=='Darwin':
+            import ctypes
+            class Usage(ctypes.Structure):
+                _fields_=[('uuid',ctypes.c_uint8*16)]+[(name,ctypes.c_uint64) for name in
+                    ('user_time','system_time','idle_wakeups','interrupt_wakeups','pageins','wired_size',
+                     'resident_size','physical_footprint','start_time','exit_time')]
+            proc=ctypes.CDLL('/usr/lib/libproc.dylib').proc_pid_rusage
+            proc.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_void_p];proc.restype=ctypes.c_int
+            sizes=[]
+            for pid in parents:
+                usage=Usage()
+                if proc(pid,0,ctypes.byref(usage))==0:sizes.append(usage.physical_footprint)
+            if sizes:result['physical_footprint_bytes']=sum(sizes)
+        result["gpu_accelerated"] = vllm_backend.gpu_verified()
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         pass
     return result
@@ -214,20 +250,7 @@ def calibration_contract(sample_text):
 
 
 def pull(model, log, cancelled=lambda: False):
-    req = urllib.request.Request(local_models.OLLAMA_URL + "/api/pull", data=json.dumps({"model": model, "stream": True}).encode(), headers={"Content-Type": "application/json"})
-    last = None
-    with urllib.request.urlopen(req, timeout=14400) as response:
-        for line in response:
-            if cancelled():
-                raise RuntimeError("Cancelled")
-            item = json.loads(line)
-            if item.get("error"):
-                raise RuntimeError(item["error"])
-            percent = round(item.get("completed", 0) / item["total"] * 100) if item.get("total") else 0
-            label = item.get("status", "Downloading") + f" {percent // 10 * 10}%"
-            if label != last:
-                log(model + ": " + label)
-                last = label
+    raise RuntimeError("Finish the vLLM model download in local setup before calibration. No Ollama fallback is available.")
 
 
 def calibrate(data, sample_text, log, seconds=600, cancelled=lambda: False, key="calibration",force=False):
@@ -271,7 +294,7 @@ def _calibrate(data, sample_text, log, seconds, cancelled, key, previous):
         if any(t["model"]==model and not t["passed"] for t in report["trials"]):
             log("Keeping the measured failed fit test for "+model+"; testing the next profile.")
             continue
-        if model not in local_models.model_names():
+        if model not in vllm_backend.model_names():
             log("Downloading calibration alternative: " + model)
             pull(model, log, cancelled)
         log("Calibrating " + model + f" for at least {seconds} seconds.")
@@ -288,7 +311,8 @@ def _calibrate(data, sample_text, log, seconds, cancelled, key, previous):
                 sample = memory_sample()
                 trial["samples"].append(sample)
                 swap_growth = (sample["swap_bytes"] or 0) - (initial["swap_bytes"] or 0)
-                if sample["pressure"] == 4 or sample["rss_bytes"] > 19 * 1024 ** 3 or swap_growth > 1024 ** 3:
+                measured=max(sample['rss_bytes'],sample.get('physical_footprint_bytes') or 0)
+                if sample["pressure"] == 4 or measured > 19 * 1024 ** 3 or swap_growth > 1024 ** 3:
                     unsafe.set()
                     cancel_request(key)
         threading.Thread(target=monitor, daemon=True).start()
@@ -311,7 +335,7 @@ def _calibrate(data, sample_text, log, seconds, cancelled, key, previous):
                     trial['last_reported']=time.time()-started
                     log(f"{model}: {trial['valid_responses']} valid structured responses; {round(time.time()-started)}/{seconds} seconds of sustained testing.")
             valid_metrics = [s for s in trial["samples"] if s["pressure"] is not None and s["swap_bytes"] is not None]
-            trial["passed"] = bool(valid_metrics and not unsafe.is_set() and any(s["gpu_bytes"] > 0 for s in valid_metrics))
+            trial["passed"] = bool(valid_metrics and not unsafe.is_set() and any(s.get("gpu_accelerated") for s in valid_metrics))
             if not trial["passed"]:
                 trial["errors"].append("Resource metrics or GPU acceleration could not be verified")
         except Exception as exc:
@@ -321,7 +345,10 @@ def _calibrate(data, sample_text, log, seconds, cancelled, key, previous):
             trial["interrupted"]=bool(cancelled())
             trial["seconds"] = round(time.time() - started, 1)
             trial["peak_rss_gib"] = round(max((s["rss_bytes"] for s in trial["samples"]), default=0) / 1024 ** 3, 2)
-            trial["peak_gpu_gib"] = round(max((s["gpu_bytes"] for s in trial["samples"]), default=0) / 1024 ** 3, 2)
+            trial['peak_physical_footprint_gib']=round(max((s.get('physical_footprint_bytes') or 0 for s in trial['samples']),default=0)/1024**3,2)
+            trial["peak_gpu_gib"] = None
+            trial['gpu_acceleration_verified']=any(s.get('gpu_accelerated') for s in trial['samples'])
+            trial["gpu_measurement_note"] = "GPU selection is checked against this server's worker log. Separate GPU allocation is not reported; Darwin process-tree physical footprint and RSS are measured independently, including startup before the socket listens."
             trial["swap_growth_gib"] = round((max((s["swap_bytes"] or 0 for s in trial["samples"]), default=0) - (initial["swap_bytes"] or 0)) / 1024 ** 3, 3)
             report["trials"].append(trial)
             atomic_json(path, report)
@@ -329,8 +356,11 @@ def _calibrate(data, sample_text, log, seconds, cancelled, key, previous):
         if cancelled():
             raise RuntimeError("Cancelled")
         if trial["passed"]:
-            details=next((m for m in local_models.request('/api/tags').get('models',[]) if m['name']==model),{})
-            report['model_details']={k:details.get(k) for k in ('name','size','details','digest')}
+            config=json.loads((vllm_backend.model_path(model)/'config.json').read_text())
+            report['model_details']={'name':model,'runtime':'vllm-metal','details':{'quantization_level':'MLX 4-bit'},
+                'quantization':config.get('quantization_config'), 'source':vllm_backend.MODELS[model]}
+            report['runtime']='vllm-metal'
+            report['previous_runtime_profile']='profile-v2.json'
             report.update(verified=True, director=model, fallback=(model != DIRECTORS[0]),
                           message=f"Measured quality profile: {model}; Metal acceleration verified.", calibrated_at=time.time())
             atomic_json(path, report)

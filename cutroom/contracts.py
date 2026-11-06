@@ -80,6 +80,12 @@ class ClipEditPlan:
                 raise ValueError("Normal story sections must retain source order")
             span = {"start": a, "end": b, "kind": kind, "speed": speed, "duration": duration,
                     "out_start": cursor, "out_end": cursor + duration}
+            if "layout" in item:
+                if item["layout"] not in {"fit", "crop"}:
+                    raise ValueError("Shot layout must be fit or crop")
+                span["layout"] = item["layout"]
+            if "focus" in item:
+                span["focus"] = rect(item["focus"])
             spans.append(span)
             mapping.append({k: span[k] for k in ("start", "end", "kind", "speed", "out_start", "out_end")})
             cursor += duration
@@ -123,6 +129,15 @@ class ClipEditPlan:
                   "facecam": rect(raw["facecam"]) if raw.get("facecam") else None,
                   "music_mood": mood, "overlays": overlays, "zooms": zooms, "sfx": sfx,
                   "reason": str(raw.get("reason", ""))[:1000]}
+        style=raw.get('caption_style','kinetic')
+        if style not in {'kinetic','clean','none'}:
+            raise ValueError('Unsupported automatic caption style')
+        result['caption_style']=style
+        if raw.get('editing_strategy'):
+            strategy=raw['editing_strategy']
+            if strategy.get('content_type') not in {'creator','challenge','reaction','gameplay','conversation','tutorial','story','mixed'} or strategy.get('pacing') not in {'patient','balanced','brisk','varied'}:
+                raise ValueError('Unknown editorial strategy')
+            result['editing_strategy']={k:str(strategy.get(k,''))[:700] for k in ('content_type','pacing','reason')}
         return cls(result)
 
     def to_dict(self):

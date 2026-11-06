@@ -6,7 +6,7 @@
   "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
   "ram_gib": null,
   "swap": null,
-  "disk_free_gib": 720.98,
+  "disk_free_gib": 713.35,
   "packages": {
     "mlx": "0.32.4",
     "mlx-lm": null,
@@ -14,14 +14,26 @@
     "huggingface-hub": null
   },
   "potential_competing_processes": [],
+  "app_runtime_environment_marker": {
+    "vllm": "0.33.0+cpu",
+    "vllm-metal": "0.33.0",
+    "mlx": "0.32.4",
+    "mlx-lm": "0.32.3.dev12+g4cfc64784",
+    "mlx-vlm": "0.7.11",
+    "torch": "2.16.0.dev20261013"
+  },
+  "deployment_verified": false,
+  "runtime_note": "App vLLM Metal installation is separate from the isolated MLX-LM 0.32.2 training proposal; no server/model was started",
   "process_telemetry_available": false,
-  "base_present": false,
+  "base_present": true,
   "dataset_present": false,
+  "base_revision_matches_app_pin": false,
+  "expected_base_revision": "a4d9b2df59d2c150bef02fcbe0d91046b7ca33a4",
   "blockers": [
     "Sandbox hides system/process telemetry; inventory cannot establish an idle GPU or memory headroom",
     "Use an isolated Python 3.11\u20133.13 environment; inspected release lists these versions",
     "Inspected MLX-LM 0.32.2 training environment is not installed here",
-    "Pinned local Qwen3 MLX 4-bit snapshot is missing or has a different config",
+    "Base revision marker does not match the app-pinned Qwen3 14B snapshot",
     "Licensed human dataset with source-grouped train/valid/test is missing"
   ]
 }

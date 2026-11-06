@@ -4,6 +4,7 @@ import hashlib
 import math
 from pathlib import Path
 import re
+import time
 
 from . import core, local_models, runtime
 from .contracts import remap_words
@@ -57,6 +58,8 @@ def source_caption_intervals(index, plan):
 
 
 def make_ass(plan, segments, index, style="kinetic",watermark=None):
+    if style=='auto':
+        style=plan.get('caption_style','kinetic')
     mapped = remap_words(segments, plan)
     suppressed = source_caption_intervals(index, plan)
     margin = 970 if plan.get("caption_position") == "upper" else 410
@@ -160,8 +163,8 @@ def crop_keyframes(index, span, focus, metadata):
 
 
 def layout_filter(label, out, plan, width, height, index, span, metadata):
-    layout = plan["layout"]
-    focus = plan["focus"]
+    layout = span.get("layout", plan["layout"])
+    focus = span.get("focus", plan["focus"])
     portrait_fraction = min(1, (width/height)/(metadata["width"]/metadata["height"]))
     if layout == "crop" and focus[2] > portrait_fraction * 1.4:
         layout = "fit"
@@ -196,6 +199,15 @@ def layout_filter(label, out, plan, width, height, index, span, metadata):
             f"[{stem}back][{stem}front]overlay=(W-w)/2:(H-h)/2,setsar=1{out}")
 
 
+def encoder_options(encoder,final,width):
+    if encoder=='h264_videotoolbox':
+        bitrate='16M' if width>=1080 else '8M'
+        return ['-c:v','h264_videotoolbox','-allow_sw','0','-profile:v','high','-b:v',bitrate,
+                '-realtime','0','-prio_speed','0','-pix_fmt','yuv420p']
+    return ['-c:v','libx264','-threads','6','-preset','slow' if final else 'veryfast',
+            '-crf','18' if final else '25','-pix_fmt','yuv420p']
+
+
 def render(studio, job, source, plan, segments, index, metadata, folder, revision=0, final=False):
     run = lambda args: studio.run(job, args)
     stem = f"c-{plan['id']}-r{revision}-{'final' if final else 'draft'}"
@@ -205,11 +217,18 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
     ass_path.write_text(ass)
     srt_path.write_text(srt(mapped))
     marker = folder / (stem + ".complete.json")
-    fingerprint = hashlib.sha256(json.dumps({"plan":plan,"config":job["config"],"ass":ass,
+    encoder=job['config'].get('video_encoder','libx264')
+    if encoder=='auto':
+        profile=studio.data/'render-profile.json'
+        settings=json.loads(profile.read_text()) if profile.exists() else {}
+        encoder='h264_videotoolbox' if final and settings.get('verified') and settings.get('encoder')=='h264_videotoolbox' else 'libx264'
+    fingerprint = hashlib.sha256(json.dumps({"renderer_version":4,"encoder":encoder,"plan":plan,"config":job["config"],"ass":ass,
         "source":[str(source),source.stat().st_size,source.stat().st_mtime_ns]},sort_keys=True).encode()).hexdigest()
     completed=json.loads(marker.read_text()) if marker.exists() else {}
     if target.exists() and completed.get("fingerprint") == fingerprint and completed.get("bytes")==target.stat().st_size:
-        return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "preserved_caption_intervals": preserved}
+        return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "preserved_caption_intervals": preserved,
+                'render_seconds':0,'cache_hit':True,'encoder':completed.get('encoder')}
+    started=time.monotonic()
     marker.unlink(missing_ok=True)
     (folder/(stem+".review.json")).unlink(missing_ok=True)
     temporary = folder / (stem + ".partial.mp4")
@@ -277,21 +296,31 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
         filters.append("[key]anullsink")
         mix = ["[voice]", *effects]
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:duration=first:normalize=0,alimiter=limit=.89[outa]")
-    command += ["-filter_complex", ";".join(filters), "-map", "[outv]", "-map", "[outa]", "-t", str(plan["duration"]),
-                "-c:v", "libx264", "-threads", "6", "-preset", "slow" if final else "veryfast", "-crf", "18" if final else "25", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(temporary)]
+    command += ["-filter_complex", ";".join(filters), "-map", "[outv]", "-map", "[outa]", "-t", str(plan["duration"])]
+    video_start=len(command)
+    command+=encoder_options(encoder,final,width)
+    video_end=len(command)
+    command += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(temporary)]
     try:
-        run(command)
+        try:
+            run(command)
+        except RuntimeError:
+            if encoder!='h264_videotoolbox':raise
+            studio.event(job,'Hardware encoding could not finish; retrying this render with the CPU encoder.')
+            command=command[:video_start]+encoder_options('libx264',final,width)+command[video_end:]
+            encoder='libx264';run(command)
         probe=json.loads(run([local_models.binary("ffprobe"),"-v","error","-show_format","-of","json",str(temporary)]))
         if abs(float(probe["format"]["duration"])-plan["duration"])>.25:
             raise RuntimeError("Incomplete rendered duration; this draft will be retried on resume.")
         temporary.replace(target)
-        runtime.atomic_json(marker,{"fingerprint":fingerprint,"bytes":target.stat().st_size})
+        runtime.atomic_json(marker,{"fingerprint":fingerprint,"bytes":target.stat().st_size,'encoder':encoder,
+                                   'render_seconds':round(time.monotonic()-started,2)})
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
     runtime.atomic_json(folder / (stem + ".assets.json"), {"assets": used, "caption_intervals_preserved": preserved})
-    return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "assets": used, "preserved_caption_intervals": preserved}
+    return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "assets": used, "preserved_caption_intervals": preserved,
+            'render_seconds':round(time.monotonic()-started,2),'cache_hit':False,'encoder':encoder}
 
 
 def technical_qc(studio, job, video, expected_duration, resolution):
@@ -307,8 +336,12 @@ def technical_qc(studio, job, video, expected_duration, resolution):
     peak = float(audio.get("input_tp", "inf"))
     loudness = float(audio.get("input_i", "-inf"))
     failures = []
-    if duration <= 60:
-        failures.append("Every exported short must be longer than 60 seconds")
+    minimum=job['config'].get('min_duration',61)
+    maximum=job['config'].get('max_duration',120)
+    if duration<minimum-.05 or duration>maximum+.05:
+        failures.append('Rendered duration is outside the chosen length range')
+    if minimum>60 and duration<=60:
+        failures.append('The chosen over-one-minute preset needs a video longer than 60 seconds')
     if abs(duration-expected_duration) > .25:
         failures.append("Rendered duration does not match the edit plan")
     expected_height = round(resolution*16/9/2)*2
