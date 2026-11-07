@@ -117,6 +117,27 @@ class TimelineTests(unittest.TestCase):
         self.assertIn('hello',render_v2.srt(remap_words(segments,edit)))
 
 class ImportTests(unittest.TestCase):
+    def test_chrome_os_denial_is_not_misreported_as_a_missing_cookie_file(self):
+        config={'youtube_auth':{'consent':True,'browser':'chrome'}}
+        with patch.object(source_media.sys,'platform','darwin'),patch.object(source_media.os,'scandir',side_effect=PermissionError):
+            with self.assertRaisesRegex(RuntimeError,'macOS blocked access'):
+                source_media.browser_access_preflight(config)
+        with patch.object(source_media.os,'scandir') as scan:
+            source_media.browser_access_preflight({})
+        scan.assert_not_called()
+
+    def test_saved_consent_is_not_reported_as_missing_when_safari_access_is_denied(self):
+        config={'youtube_auth':{'consent':True,'browser':'safari'}}
+        denied=source_media.import_error("ERROR: Operation not permitted: /private/Cookies.binarycookies",config)
+        self.assertIn('macOS blocked access',denied)
+        self.assertIn('authorization was saved',denied)
+        self.assertNotIn('/private',denied)
+        self.assertNotIn('No browser cookies were read automatically',denied)
+        rejected=source_media.import_error('Sign in to confirm your age',config)
+        self.assertIn('did not accept that session',rejected)
+        anonymous=source_media.import_error('Sign in to confirm your age',{})
+        self.assertIn('explicitly enable',anonymous)
+
     def test_new_project_keeps_the_selected_short_duration(self):
         from cutroom.engine import Studio
         with tempfile.TemporaryDirectory() as name:

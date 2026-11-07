@@ -1,8 +1,10 @@
 """Original-language imports with global source caching and explicit local auth."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import sys
 from urllib.parse import parse_qs, urlparse
 
 from .core import youtube_url
@@ -36,6 +38,39 @@ def auth_arguments(config):
     return ["--cookies-from-browser", auth["browser"]]
 
 
+def import_error(error,config):
+    """Distinguish consent, OS access, and YouTube rejection without leaking cookies."""
+    lower=str(error).lower()
+    auth=config.get('youtube_auth') or {}
+    browser=str(auth.get('browser','browser')).capitalize()
+    authorized=auth.get('consent') is True
+    if authorized and any(term in lower for term in ('operation not permitted','permission denied')) and any(term in lower for term in ('cookies','safari')):
+        return f'{browser} authorization was saved, but macOS blocked access to protected browser data. Browser imports need permission for the Cutroom desktop app in System Settings → Privacy & Security → Full Disk Access. This grants broader file access. After enabling it, restart the local studio before retrying. Alternatively, upload an accessible video file. Your authorization checkbox is not the problem.'
+    if authorized and any(term in lower for term in ('could not find','no such file')) and 'cookie' in lower:
+        return f'No usable cookie file was found for {browser}. Choose the browser where you are signed into YouTube and can play this video, or upload an accessible video file.'
+    if authorized and any(term in lower for term in ('keychain','decrypt')):
+        return f'macOS could not unlock the selected {browser} session. Choose another explicitly authorized browser session, or upload an accessible video file.'
+    if any(term in lower for term in ('confirm your age','sign in','cookies','private video','not a bot')):
+        if authorized:
+            return f'An authorized {browser} import was attempted, but YouTube did not accept that session for this video. Check that this video plays while signed into that browser, or upload an accessible video file.'
+        return 'YouTube requires an authorized session for this video. In Make it yours → Restricted YouTube video?, explicitly enable your signed-in browser session, or upload an accessible video file. No browser cookies were read automatically.'
+    return str(error)
+
+
+def browser_access_preflight(config):
+    # yt-dlp's directory walk can hide an OS denial as "database not found".
+    # Check directory access only, for the browser explicitly authorized here.
+    auth=config.get('youtube_auth') or {}
+    if sys.platform!='darwin' or auth.get('consent') is not True or auth.get('browser')!='chrome':return
+    folder=Path.home()/'Library/Application Support/Google/Chrome'
+    try:
+        with os.scandir(folder):pass
+    except PermissionError as exc:
+        raise RuntimeError(import_error('Permission denied accessing Chrome cookies',config)) from exc
+    except FileNotFoundError:
+        pass
+
+
 def select_audio(metadata):
     original = str(metadata.get("language") or "").split("-")[0]
     formats = [f for f in metadata.get("formats", []) if f.get("vcodec") == "none" and f.get("acodec") not in {None, "none"}]
@@ -67,6 +102,7 @@ def import_source(studio, job):
             return target
     executable = binary("yt-dlp")
     base = [executable, "--ignore-config", "--no-playlist", "--no-progress", *auth_arguments(job["config"])]
+    browser_access_preflight(job['config'])
     try:
         raw = json.loads(run(base + ["--skip-download", "--dump-single-json", "--", url]))
         duration = float(raw.get("duration") or 0)
@@ -77,10 +113,7 @@ def import_source(studio, job):
         studio.event(job, "Downloading the original-language video and audio tracks.")
         run(base + ["--max-filesize", "4G", "-f", selector, "--merge-output-format", "mp4", "-o", str(cache / "source.%(ext)s"), "--", url])
     except RuntimeError as exc:
-        error = str(exc)
-        if any(term in error.lower() for term in ("confirm your age", "sign in", "cookies", "private video", "not a bot")):
-            raise RuntimeError("YouTube requires an authorized session for this video. In Advanced settings, explicitly enable your local browser session, or upload an accessible original file. No browser cookies were read automatically.") from exc
-        raise
+        raise RuntimeError(import_error(exc,job['config'])) from exc
     files = [p for p in cache.glob("source.*") if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}]
     if not files:
         raise RuntimeError("The source was not downloaded.")

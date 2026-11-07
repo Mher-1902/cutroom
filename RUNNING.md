@@ -58,3 +58,11 @@ The interface, local models, renderer, checkpoint system, and source import are 
 ## When another model server is running
 
 Cutroom waits before loading its model when it detects another vLLM server on the Mac. The project shows **Waiting for your other model server**. You can leave the browser closed: the job continues automatically once that other server closes, or use **Stop & save progress** to cancel the wait. Cutroom never stops another project's model server. The full automatic reference-video acceptance test remains unfinished; see `VERIFICATION.md` for current failures and fixes.
+
+## Authorized browser import denied by macOS
+
+Checking the browser-session box authorizes Cutroom; it does not override macOS privacy controls. Safari and Chrome directory checks on this Mac returned `Operation not permitted`. Chrome's downloader reported that as a missing database, so the importer now checks authorized Chrome directory access before downloading and reports the OS denial accurately.
+
+For browser-session imports, the next permission step is **System Settings → Privacy & Security → Full Disk Access → add/enable Cutroom.app** from the Desktop. This is broad access to protected files, not just a YouTube permission. A local video upload avoids needing browser access. [Apple's explanation of Full Disk Access](https://support.apple.com/en-au/guide/mac-help/mchl211c911f/mac).
+
+Launch the backend through the Cutroom desktop app. After changing the permission, the local backend must be restarted as well as the window; closing the window alone intentionally leaves that backend running. The assistant can stop the local studio, reopen the desktop app and retry the saved project after the user grants permission. macOS permission changes require the user; the app does not grant them automatically. The authorized Chrome retry remains blocked until access is available, and a successful download has not been claimed.
