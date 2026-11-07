@@ -118,11 +118,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         position=watermark.get("watermark_position","top-right")
         left=position.endswith("left")
         top=position.startswith("top")
-        alpha=round(255*(1-watermark.get("watermark_opacity",.25)))
+        alpha=round(255*(1-watermark.get("watermark_opacity",.20)))
         x,y=(65 if left else 1015),(115 if top else 1720)
         anchor=(7 if left else 9) if top else (1 if left else 3)
         text=core.ass_escape(watermark["watermark_text"])
-        tag=f"{{\\an{anchor}\\pos({x},{y})\\fs38\\fnBarlow Condensed\\bord1\\shad0\\alpha&H{alpha:02X}&\\c&HFFFFFF&}}"
+        tag=f"{{\\an{anchor}\\pos({x},{y})\\fs28\\fnBarlow Condensed\\bord0.6\\shad1\\blur0.3\\alpha&H{alpha:02X}&\\c&HFFFFFF&}}"
         events.append(f"Dialogue: 3,0:00:00.00,{core.ass_time(plan['duration'])},Captions,,0,0,0,,{tag}{text}")
     return header + "\n".join(events) + "\n", mapped, len(suppressed)
 

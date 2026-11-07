@@ -46,3 +46,9 @@ At the user's request, a separate Qwen server on port 8687 remains running. Cutr
 A native Swift/AppKit/WebKit Cutroom.app was compiled, locally signed, installed on the Desktop and opened successfully against the existing studio. The app window displayed the count/length controls and current GPU-wait status. Closing the window leaves background jobs running. Source includes a reproducible Build Desktop.command. macOS iconutil required unsandboxed icon-service access in this Codex session; the produced bundle and signature verified successfully.
 
 Director/critic guidance now explicitly requires a truthful curiosity question, progressive evidence and a delivered answer/payoff, while avoiding invented stakes or filler. Global selection reinforces distinct events rather than alternate crops/hooks of one event. Those prompt changes are implemented, not evidence of a newly qualified real-video output. A launcher regression now waits for the installation lock after the HTTP port closes, fixing rapid restart during shutdown. 50 application tests pass.
+
+## Journal and watermark controls
+
+The empty queued-project journal previously opened to a blank area. It now uses an explicit Open/Close button with an entry count, persistent open state during refresh, current-stage status, and a useful zero-entry explanation. Verified in the native desktop window against the user's queued project.
+
+The username/watermark field is now visible before Create, outside the advanced panel. Blank disables it; the user supplies their own username. Appearance options include a live preview, corner placement and opacity. New defaults are 28px at 1080 output, 20% opacity, a light outline and soft shadow. Existing project settings/exports are preserved. Renderer escaping and style checks pass; native UI verified the 20% preview and empty/off state. 50 application checks and three JavaScript checks pass. No new automatic qualified output is claimed.

@@ -97,6 +97,8 @@ class TimelineTests(unittest.TestCase):
         ass,mapped,_=render_v2.make_ass(edit,[],{'blocks':[]},watermark=settings)
         self.assertIn('Source: @creator',ass)
         self.assertIn('\\alpha&HBF&',ass)
+        self.assertIn('\\fs28',ass)
+        self.assertIn('\\shad1\\blur0.3',ass)
         self.assertNotIn('{\\pos(0,0)}',ass)
         self.assertEqual(mapped,[])
         with self.assertRaises(ValueError):core.settings({'watermark_opacity':float('nan')})

@@ -33,7 +33,7 @@ def settings(raw):
         "min_score": int(raw.get("min_score", 70)),
         "watermark_text": str(raw.get("watermark_text", "")).strip()[:64],
         "watermark_position": raw.get("watermark_position", "top-right"),
-        "watermark_opacity": float(raw.get("watermark_opacity", .25)),
+        "watermark_opacity": float(raw.get("watermark_opacity", .20)),
     }
     if result["style"] not in {"auto", "kinetic", "clean", "none"} or result["layout"] not in {"auto", "fit", "crop", "split"}:
         raise ValueError("Unknown caption style or layout.")
