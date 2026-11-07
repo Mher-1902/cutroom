@@ -24,4 +24,4 @@ jobs:
           python -m compileall -q app.py cutroom training tests
           node --check static/app.js
           node --check static/estimate.js
-          node --test tests/test_estimate.js
+          node --test tests/test_estimate.js tests/test_project_status.js
