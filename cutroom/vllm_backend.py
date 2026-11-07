@@ -77,6 +77,24 @@ def process_id():
     return _process.pid if _process is not None and _process.poll() is None else None
 
 
+def competing_servers():
+    """Observe other model servers; never stop or reconfigure them."""
+    import re
+    try:
+        output=subprocess.check_output(['ps','-axo','pid=,command='],text=True,timeout=5)
+    except (OSError,subprocess.SubprocessError):
+        return []
+    servers=[]
+    for line in output.splitlines():
+        fields=line.strip().split(None,1)
+        if len(fields)!=2:continue
+        pid=int(fields[0]);command=fields[1]
+        if pid==process_id() or not re.search(r'(?:/vllm\s+serve\s|vllm\.entrypoints\.cli\.main\s+serve\s)',command):continue
+        port=re.search(r'--port\s+(\d+)',command)
+        servers.append({'pid':pid,'port':int(port[1]) if port else None})
+    return servers
+
+
 def gpu_verified():
     if _process is None or _process.poll() is not None:
         return False
@@ -117,6 +135,17 @@ def stop():
 def ensure_model(model, cancelled=lambda: False):
     global _process, _log, _model, _log_start
     with _lock:
+        competitors=competing_servers()
+        if competitors:
+            stop()
+            while competitors:
+                _record(status='waiting_for_gpu',blocking_servers=competitors,model=model)
+                if cancelled():
+                    _record(status='idle',blocking_servers=[],model=None)
+                    raise RuntimeError('Cancelled')
+                time.sleep(2)
+                competitors=competing_servers()
+        _state.pop('blocking_servers',None)
         if _model == model and _process is not None and _process.poll() is None:
             return
         if not installed() or model not in model_names():
@@ -133,8 +162,8 @@ def ensure_model(model, cancelled=lambda: False):
                    VLLM_METAL_MULTIMODAL_MODE="auto", OMP_NUM_THREADS="2")
         command = [str(DATA / "vllm-venv/bin/vllm"), "serve", str(model_path(model)),
                    "--host", "127.0.0.1", "--port", "11440", "--served-model-name", model,
-                   "--max-model-len", "8192" if MODELS[model]['vision'] else "12288", "--max-num-seqs", "2" if MODELS[model]['vision'] else "1",
-                   "--max-num-batched-tokens", "2048" if MODELS[model]['vision'] else "1024",
+                   "--max-model-len", "8192", "--max-num-seqs", "2" if MODELS[model]['vision'] else "1",
+                   "--max-num-batched-tokens", "2048" if MODELS[model]['vision'] else "256",
                    "--gpu-memory-utilization", "0.68", "--kv-cache-memory-bytes", "805306368" if MODELS[model]['vision'] else "1207959552",
                    "--disable-log-requests"]
         if MODELS[model]['vision']:

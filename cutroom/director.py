@@ -198,6 +198,10 @@ def make_plan(studio, job, candidate, index, segments, previous=None, feedback=N
     low, high = job["config"]["min_duration"], job["config"]["max_duration"]
     left, right = max(0, candidate["start"]-8), min(index["duration"], candidate["end"]+8)
     rules = (f"Create a video-aware edit lasting {low}–{high} seconds. Use only source seconds {left:.2f}–{right:.2f}. "
+             "The visual observation blocks are evidence, NOT an edit timeline. Do not copy their full intervals into spans. "
+             "Select concise source sections from the timestamped speech and action, including essential setup and the real payoff. "
+             f"The SUM of (end-start)/speed for all retained normal/replay spans plus freeze durations must stay between {low} and {high} seconds. "
+             "Exclude all sponsor/ad passages inside the window. Correct the proposed title when source evidence contradicts it. "
              "Keep essential setup, reveal/action and reaction/payoff. Remove dead air only when visual action and suspense do not need it. "
              "Never pad an event with loops, repeated shots, long stills or unnecessary slow motion just to reach the requested length. "
              "Normal spans retain chronological order. A replay is <=4 seconds; a freeze is .25–1.5 seconds with start=end. "
@@ -208,6 +212,8 @@ def make_plan(studio, job, candidate, index, segments, previous=None, feedback=N
              "Use a few source-grounded editorial callouts, a short hook, timed emphasis, and music matching the moment. "
              "A source already containing rapid edits, captions and music needs lighter intervention. "
              "Do not invent quotes or cover important existing text. Title, captions and graphics match the source language. "
+             "Prefer 2–6 deliberate source spans, at most two short overlays, three zooms and three sound cues when useful; fewer effects can be appropriate. "
+             "Keep title under 10 words, hook under 12, post_caption under 35, and both reasons under 45 words. "
              "For normal/replay spans, duration can be 0 (calculated by code); for freezes supply the exact positive duration.\n")
     if previous:
         previous={k:v for k,v in previous.items() if k!='mapping'}
@@ -221,8 +227,9 @@ def make_plan(studio, job, candidate, index, segments, previous=None, feedback=N
                                  "source_language": index["language"], "content_preference":job['config'].get('content_mode','auto'),
                                  "audience": job["config"].get("brief", "")}, ensure_ascii=False)
     last_error = None
+    correction=''
     for attempt in range(2):
-        raw = call(studio, job, COMMON, prompt + (f"\nFix this validation problem from the previous attempt: {last_error}" if last_error else ""), PLAN_SCHEMA, predict=3000)
+        raw = call(studio, job, COMMON, prompt + correction, PLAN_SCHEMA, predict=1800)
         if hasattr(studio,'jobs_dir'):
             runtime.atomic_json(studio.jobs_dir/job['id']/f"director-raw-{candidate['id']}-{time.time_ns()}.json",raw)
         raw["id"] = candidate["id"]
@@ -246,6 +253,11 @@ def make_plan(studio, job, candidate, index, segments, previous=None, feedback=N
             return plan
         except (ValueError, TypeError, KeyError) as exc:
             last_error = str(exc)
+            measured=sum(s.get('duration',0) if s.get('kind')=='freeze' else
+                         max(0,s.get('end',0)-s.get('start',0))/max(.01,s.get('speed',1)) for s in raw.get('spans',[]))
+            correction=(f'\nThe previous proposal FAILED validation: {last_error}. Its calculated total was {measured:.2f} seconds; '
+                        f'the required total is {low}–{high}. Make different cuts that retain setup and payoff, rather than repeating those full blocks. '
+                        'Previous proposed source spans: '+json.dumps(raw.get('spans',[]),separators=(',',':')))
     raise RuntimeError("Director could not produce a safe, valid timeline: " + str(last_error))
 
 

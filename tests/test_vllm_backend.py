@@ -9,6 +9,18 @@ from cutroom import runtime, vllm_backend as backend
 
 
 class NativeBackendTests(unittest.TestCase):
+    def test_other_server_is_detected_without_taking_it_over(self):
+        rows='12 /app/vllm serve /model --port 11440\n42 python -m vllm.entrypoints.cli.main serve /other --port 8687\n99 /bin/editor\n'
+        with patch.object(backend.subprocess,'check_output',return_value=rows),patch.object(backend,'process_id',return_value=12):
+            self.assertEqual(backend.competing_servers(),[{'pid':42,'port':8687}])
+        with patch.object(backend,'competing_servers',return_value=[{'pid':42,'port':8687}]), \
+             patch.object(backend,'stop') as stop,patch.object(backend,'_record') as record, \
+             patch.object(backend.time,'sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError,'Cancelled'):
+                backend.ensure_model(runtime.DIRECTORS[0],cancelled=lambda:True)
+        stop.assert_called_once();sleep.assert_not_called()
+        self.assertEqual(record.call_args_list[0].kwargs['status'],'waiting_for_gpu')
+
     def test_batch_checkpoints_completed_window_when_its_neighbor_fails(self):
         model=runtime.VISION_MODEL
         saved=[]

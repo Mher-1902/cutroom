@@ -94,6 +94,12 @@ def health(data):
     except (OSError, ValueError):
         pass
     result['ready'] = result['ready'] and not result['migration_in_progress']
+    try:
+        serving=json.loads((data/'vllm-runtime.json').read_text())
+    except (OSError,ValueError):
+        serving={}
+    result['gpu_waiting']=serving.get('status')=='waiting_for_gpu'
+    result['blocking_servers']=serving.get('blocking_servers',[]) if result['gpu_waiting'] else []
     return result
 
 

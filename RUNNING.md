@@ -46,3 +46,7 @@ An internet-hosted multi-user version needs authentication, isolation, persisten
 ## Current test status
 
 The interface, local models, renderer, checkpoint system, and source import are available to test. The user approved the 71.72-second portrait editing preview. Native vLLM Metal model calibration and hardware rendering passed their measured checks. The full autonomous reference-video run remains in progress; no promise of ten qualifying results, virality, rights clearance, or platform payouts is made. See [VERIFICATION.md](VERIFICATION.md).
+
+## When another model server is running
+
+Cutroom waits before loading its model when it detects another vLLM server on the Mac. The project shows **Waiting for your other model server**. You can leave the browser closed: the job continues automatically once that other server closes, or use **Stop & save progress** to cancel the wait. Cutroom never stops another project's model server. The full automatic reference-video acceptance test remains unfinished; see `VERIFICATION.md` for current failures and fixes.

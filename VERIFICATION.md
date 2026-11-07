@@ -34,3 +34,9 @@ Updated 6 November 2026. This file records verification, not a promise of views 
 ## Selectable clip lengths
 
 The user's latest instruction allows short clips for other platforms. The default remains 61–120 seconds; visible independent controls select 1–10 clips and 15–29 seconds, 30–59 seconds, 61–120 seconds, or a custom 15–180-second range. Browser checks confirmed independent selection and custom 20–45-second input. Regression checks verify that short plans/export QC pass the requested range and fail an incompatible range. Short preset end-to-end AI production is still an acceptance check. The earlier unconditional >60-second rule is superseded by the selected range.
+
+## 7 November status
+
+49 application tests pass, including selected short-length project creation and preservation of unrelated model servers. The real-video run has **zero qualified exports**: the first edit proposals exceeded duration bounds, and the previous vLLM worker later reported a Metal out-of-memory error. Source analysis, candidate decisions, alignment and raw invalid plans remain saved. Tightened duration/ad-removal instructions, a smaller 8,192-token director context, 256-token prefill chunks and a smaller output cap are implemented; their full real-video acceptance is pending.
+
+At the user's request, a separate Qwen server on port 8687 remains running. Cutroom waits in the background before loading its own large model while another vLLM server is active. Cancellation exits that wait; no external server is stopped or reconfigured. The site remains available. Main promotion is still pending successful real-video output checks.

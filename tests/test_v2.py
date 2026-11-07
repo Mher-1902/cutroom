@@ -1,4 +1,5 @@
 import json
+import queue
 from pathlib import Path
 import tempfile
 import threading
@@ -114,6 +115,21 @@ class TimelineTests(unittest.TestCase):
         self.assertIn('hello',render_v2.srt(remap_words(segments,edit)))
 
 class ImportTests(unittest.TestCase):
+    def test_new_project_keeps_the_selected_short_duration(self):
+        from cutroom.engine import Studio
+        with tempfile.TemporaryDirectory() as name:
+            studio=Studio.__new__(Studio)
+            studio.data=Path(name);studio.jobs_dir=Path(name)/'jobs';studio.jobs_dir.mkdir()
+            studio.setup_state={'running':False};studio.jobs={};studio.cancel_flags={}
+            studio.lock=threading.RLock();studio.queue=queue.Queue()
+            chosen={'director':runtime.DIRECTORS[0],'verified':True}
+            health={'ready':True,'models':[runtime.DIRECTORS[0],runtime.VISION_MODEL]}
+            with patch.object(runtime,'profile',return_value=chosen),patch.object(runtime,'health',return_value=health):
+                result=studio.create({'url':'https://www.youtube.com/watch?v=_c2e1NcI3Sc','count':3,'min_duration':15,'max_duration':29})
+            self.assertEqual(result['config']['count'],3)
+            self.assertEqual((result['config']['min_duration'],result['config']['max_duration']),(15,29))
+            self.assertEqual(studio.queue.get_nowait(),result['id'])
+
     def test_short_duration_presets_survive_planning_and_export_checks(self):
         for low,high,length in [(15,29,25),(30,59,45),(61,120,72)]:
             with self.subTest(low=low):
