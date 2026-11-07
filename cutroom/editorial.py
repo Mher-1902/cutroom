@@ -5,6 +5,13 @@ not a trained adapter or a claim about future reach.
 """
 
 DIRECTOR_GUIDE = """SHORT-FORM CREATIVE BRIEF:
+Every short needs a truthful curiosity gap: its opening should make the viewer
+wonder one specific question. Reveal evidence and partial answers as the real
+event unfolds, then answer that question with the retained payoff before ending.
+The question may be implicit in action, stakes or dialogue; a literal question
+on screen is optional. In the edit reason, state what viewers will wonder and
+which retained moment answers it. Do not invent stakes, promise an unseen result,
+withhold essential context, or add filler merely to delay the answer.
 Choose a structure supported by the source: a challenge with an outcome, a reveal
 with its real reaction, a clear change over time, or an emotional turning point.
 For each candidate, consider three truthful opening approaches internally: stakes,
@@ -30,7 +37,11 @@ Summarize the chosen structure, opening and payoff in the edit reason.
 """
 
 CRITIC_GUIDE = """Check whether the first two seconds communicate a concrete subject
-and premise. Check that the retained ending answers the hook honestly. Flag tiny
+and premise, and make the viewer wonder a specific, source-grounded question. Verify that
+the retained sequence develops the answer and actually delivers it before the
+clip ends. Flag an opening whose promised answer is missing or contradicted;
+do not reward empty clickbait or forced question text.
+Check that the retained ending answers the hook honestly. Flag tiny
 source pictures inside excessive empty backdrop when a safe closer view exists,
 as well as crops that hide action. Evaluate text against faces, source text and
 the edges of a phone screen. Effects should emphasize real beats and preserve

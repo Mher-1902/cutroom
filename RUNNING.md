@@ -1,3 +1,11 @@
+# Cutroom desktop app
+
+Open **Cutroom.app** on your Desktop. It starts the existing local studio and opens it in a native Mac window, with upload dialogs, video playback and file-save dialogs. No Terminal command is needed for normal use. Closing or quitting the desktop window leaves the background studio and its jobs running. The app menu also offers Open in Browser.
+
+This desktop window uses the original project and its existing models/data; keep that project folder in place. It does not fix or bypass the pending automatic editing acceptance checks described in `VERIFICATION.md`.
+
+To rebuild from a new project location, double-click **Build Desktop.command** (requires Apple's Command Line Tools). It creates `Cutroom.app` beside the project. Existing apps are not overwritten; choose another output with `./"Build Desktop.command" --output /path/to/Cutroom.app`. The bundle contains a native Swift/AppKit/WebKit executable, a local icon and the path to the studio. Model weights remain in the project folder.
+
 # Use Cutroom without this chat
 
 ## On this Mac

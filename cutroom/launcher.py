@@ -58,12 +58,26 @@ def keep_awake(state):
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
+def installation_idle():
+    with open(DATA / 'studio.lock','a') as lock:
+        try:
+            fcntl.flock(lock,fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            return False
+
+
 def start(open_browser=True, awake=False):
     DATA.mkdir(exist_ok=True)
     with open(DATA / "launcher.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         state = probe()
         if state is None:
+            for _ in range(60):
+                if installation_idle():break
+                time.sleep(.5)
+            else:
+                raise RuntimeError('The previous studio is still closing. Retry shortly; saved progress is preserved.')
             python = ROOT / "data/venv/bin/python"
             if not python.is_file():
                 python = Path(sys.executable)
@@ -96,7 +110,7 @@ def stop():
     pid = verified_pid(state)
     os.kill(pid, signal.SIGTERM)
     for _ in range(60):
-        if probe() is None:
+        if probe() is None and installation_idle():
             print("Cutroom stopped. Resume interrupted projects from Your projects after starting again.")
             return
         time.sleep(.5)

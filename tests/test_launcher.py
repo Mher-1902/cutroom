@@ -9,6 +9,14 @@ from cutroom import launcher
 
 
 class LauncherTests(unittest.TestCase):
+    def test_shutdown_waits_for_the_project_lock_after_the_port_closes(self):
+        with patch.object(launcher,'probe',side_effect=[{'pid':123},None,None]), \
+             patch.object(launcher,'verified_pid',return_value=123), \
+             patch.object(launcher,'installation_idle',side_effect=[False,True]), \
+             patch.object(launcher.os,'kill'),patch.object(launcher.time,'sleep') as sleep:
+            launcher.stop()
+        sleep.assert_called_once_with(.5)
+
     def test_refuses_to_stop_an_unrelated_process(self):
         result = subprocess.CompletedProcess([], 0, stdout="/usr/bin/python3 unrelated.py\n")
         with patch.object(launcher.subprocess, "run", return_value=result):

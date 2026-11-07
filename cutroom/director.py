@@ -177,6 +177,8 @@ def propose(studio, job, index, segments, folder):
                 "Rank these candidates for a diverse shortlist of approximately ten entertaining shorts. "
                 "Mark duplicate_ids when two candidates repeat the SAME reveal/outcome, even if their time ranges differ. "
                 "Keep distinct events in the same challenge when each has its own setup and payoff. Use only the provided IDs. "
+                "Every retained clip must stand alone, with its own source-grounded curiosity question and earned answer. "
+                "Different crops, hooks or captions of the same event do not make distinct clips. Return fewer when needed. "
                 "Return the best first in ordered_ids, at most 40. An ID cannot occur in both arrays. Keep reason under 30 words.\n" + json.dumps(compact, ensure_ascii=False), rank_schema, predict=1200)
     runtime.atomic_json(folder/'rank-v4-raw.json',rank)
     lookup = aliases
