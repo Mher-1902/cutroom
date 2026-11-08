@@ -7,6 +7,7 @@ import wave
 
 from . import core, local_models, runtime, scout
 from .contracts import SceneIndex, rect
+from .source_policy import MAX_SOURCE_SECONDS
 
 INDEX_SCHEMA = {"type": "object", "properties": {
     "summary": {"type": "string", "maxLength": 240}, "mode": {"type": "string", "enum": ["creator", "reaction", "gameplay", "challenge", "conversation", "tutorial", "story", "mixed"]},
@@ -48,8 +49,8 @@ def inspect_source(source, run):
     if not video:
         raise ValueError("The source has no video stream.")
     duration = float(data["format"].get("duration", 0))
-    if not 5 < duration <= 7200:
-        raise ValueError("Choose a completed video up to two hours long.")
+    if not 5 < duration <= MAX_SOURCE_SECONDS:
+        raise ValueError("Choose a completed video longer than 5 seconds and up to 12 hours.")
     rotation = next((s.get("rotation",0) for s in video.get("side_data_list",[]) if "rotation" in s),video.get("tags",{}).get("rotate",0))
     width,height = video["width"],video["height"]
     if abs(int(float(rotation))) % 180 == 90:
@@ -177,10 +178,15 @@ def calibration_visual(studio,job,source,folder,metadata):
     target=folder/'calibration-visual.json'
     if target.exists():
         return json.loads(target.read_text())
-    frames=prepare_frames(studio,job,source,folder,metadata['duration'])
     end=min(metadata['duration'],120)
-    times=sorted(set(min(len(frames)-1,round(i*(end-1)/11)) for i in range(12)))
-    sheet=contact_sheet([frames[i] for i in times],times,folder/'calibration-visual.jpg')
+    if job.get('processing_strategy',{}).get('mode')=='long_stream':
+        times=sorted({round(i*(end-1)/11) for i in range(12)})
+        paths=source_frames(studio,job,source,folder,times,metadata['duration'])
+    else:
+        frames=prepare_frames(studio,job,source,folder,metadata['duration'])
+        times=sorted(set(min(len(frames)-1,round(i*(end-1)/11)) for i in range(12)))
+        paths=[frames[i] for i in times]
+    sheet=contact_sheet(paths,times,folder/'calibration-visual.jpg')
     observed=runtime.chat(runtime.VISION_MODEL,INDEX_SYSTEM,
         f'Describe only visible events across source seconds 0–{end}. This speech-free source is being used for a director fit test. Do not invent narration or unseen outcomes. facecam=[] if absent.',
         index_schema(0,end),[sheet],cancelled=lambda:studio.cancel_flags[job['id']].is_set(),key=job['id'],predict=1000,metrics=job.setdefault('inference',[]))
@@ -293,17 +299,39 @@ def build_index(studio, job, source, folder, metadata, segments, language):
     return result
 
 
+def source_frames(studio, job, source, folder, positions, duration):
+    """Seek only requested frames for long sources; retain legacy frame numbering."""
+    if job.get('processing_strategy',{}).get('mode') != 'long_stream':
+        return [folder/'frames'/f'frame-{i+1:06}.jpg' for i in positions]
+    directory=folder/'sparse-frames';directory.mkdir(exist_ok=True)
+    paths=[]
+    for at in positions:
+        studio.check_cancel(job['id'])
+        target=directory/f'frame-{at+1:06}.jpg'
+        if not target.exists():
+            temporary=target.with_name(target.stem+'.partial.jpg')
+            studio.run(job,[local_models.binary('ffmpeg'),'-hide_banner','-loglevel','error','-y',
+                            '-ss',str(min(duration-.05,at)),'-i',str(source),'-frames:v','1',
+                            '-vf','scale=640:-2','-threads','2','-q:v','4',str(temporary)])
+            if not temporary.is_file() or not temporary.stat().st_size:
+                raise RuntimeError(f'Could not extract source frame at {at} seconds.')
+            temporary.replace(target)
+        paths.append(target)
+    return paths
+
+
 def densify_regions(studio, job, folder, candidate, index):
     left, right = max(0,candidate['start']-8), min(index['duration'],candidate['end']+8)
-    paths = sorted((folder/'frames').glob('frame-*.jpg'))
-    desired = list(range(int(left),min(len(paths),math.ceil(right))))
+    long=job.get('processing_strategy',{}).get('mode')=='long_stream'
+    desired = list(range(int(left), min(math.ceil(index['duration']),math.ceil(right))))
     known = {round(r['at']):r for b in index['blocks'] for r in b.get('regions',[]) if left<=r['at']<right}
     missing = [i for i in desired if i not in known]
     directory=folder/'fine-regions';directory.mkdir(exist_ok=True)
     for offset in range(0,len(missing),120):
         positions=missing[offset:offset+120]
         output=directory/f"{candidate['id']}-{positions[0]}-{positions[-1]}.json"
-        regions=native_regions(studio,job,[paths[i] for i in positions],output)
+        paths=source_frames(studio,job,job.get('source_file'),folder,positions,index['duration'])
+        regions=native_regions(studio,job,paths,output)
         for at,region in zip(positions,regions):
             known[at]={'at':at,'faces':region['faces'],'texts':region['texts']}
     for block in index['blocks']:
@@ -335,7 +363,7 @@ def align_candidate(studio, job, folder, source_audio, segments, candidate, lang
     wav = folder / f"align-{ident}.wav"
     request = folder / f"align-{ident}.input.json"
     studio.run(job, [local_models.binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-ss", str(left),
-                     "-t", str(right-left), "-i", str(source_audio), str(wav)])
+                     "-t", str(right-left), "-i", str(source_audio), '-vn', '-ar','16000','-ac','1', str(wav)])
     runtime.atomic_json(request, {"language": language, "segments": [{"start": max(0, s["start"]-left), "end": s["end"]-left, "text": s["text"]} for s in chosen]})
     try:
         studio.run(job, worker_command(studio, "align", wav, target, request))
@@ -348,6 +376,8 @@ def align_candidate(studio, job, folder, source_audio, segments, candidate, lang
         runtime.atomic_json(target, aligned)
         return aligned
     except RuntimeError as exc:
+        from .resources import ResourcePause
+        if isinstance(exc,ResourcePause):raise
         studio.event(job, "Forced alignment unavailable for this excerpt; keeping Whisper token timing. " + str(exc)[-220:])
         target.unlink(missing_ok=True)
         return segments
@@ -380,20 +410,23 @@ def inspect_candidate(studio, job, source, candidate, index, folder):
         sheets.append(contact_sheet(paths,[left+n/4 for n in range(len(paths))],directory/f"sequence-{i}.jpg",tile_width=384))
     # Give the visual co-editor the complete selected event, motion around the
     # strongest beat/payoff, and a separate approved style example in one call.
-    frames=sorted((folder/'frames').glob('frame-*.jpg'))
-    low=max(0,math.ceil(a-.5));high=min(len(frames)-1,math.floor(b-.5))
+    source_duration=index.get('duration',b+1)
+    long=job.get('processing_strategy',{}).get('mode')=='long_stream'
+    low=max(0,math.ceil(a if long else a-.5));high=min(math.ceil(source_duration)-1,math.floor(b-.001 if long else b-.5))
     positions=sorted({round(low+(high-low)*i/7) for i in range(8)})
     frame_ids=[f'F{i+1:02}' for i in range(len(positions))]
-    frame_times=[n+.5 for n in positions]
-    storyboard=contact_sheet([frames[n] for n in positions],frame_times,directory/'storyboard.jpg',
+    frame_times=[n if long else n+.5 for n in positions]
+    paths=source_frames(studio,job,source,folder,positions,source_duration)
+    storyboard=contact_sheet(paths,frame_times,directory/'storyboard.jpg',
                              tile_width=320,columns=4,frame_labels=frame_ids)
     frame_lookup=dict(zip(frame_ids,frame_times))
     native_by_frame={}
     samples=[sample for block in index['blocks'] for sample in block.get('regions',[])]
     for ident,at in frame_lookup.items():
-        nearest=min(samples,key=lambda sample:abs(sample['at']-(at-.5)),default=None)
+        expected=at if long else at-.5
+        nearest=min(samples,key=lambda sample:abs(sample['at']-expected),default=None)
         native_by_frame[ident]=({k:nearest.get(k,[]) for k in ('faces','texts')}
-                               if nearest and abs(nearest['at']-(at-.5))<.6 else {'faces':[],'texts':[]})
+                               if nearest and abs(nearest['at']-expected)<.6 else {'faces':[],'texts':[]})
     best=min(range(len(centers)),key=lambda i:abs(sorted(centers)[i]-(cues[0]['at'] if cues else (a+b)/2)))
     motion=[sheets[best],sheets[-1]] if best!=len(sheets)-1 else [sheets[0],sheets[-1]]
     images=[storyboard,*motion]
@@ -426,7 +459,7 @@ def inspect_candidate(studio, job, source, candidate, index, folder):
                             'speech':compact_speech(json.loads((folder/'segments.json').read_text()),a,b)},ensure_ascii=False))
     studio.event(job,f'Visual co-editor is viewing {len(positions)} source frames, two motion strips'+(' and the approved hype reference.' if reference.is_file() else '.'))
     raw = runtime.chat(runtime.VISION_MODEL,INDEX_SYSTEM,prompt,schema,images,
-                       cancelled=lambda:studio.cancel_flags[job["id"]].is_set(),key=job["id"],predict=1400,metrics=job.setdefault("inference",[]))
+                       cancelled=lambda:studio.model_cancelled(job['id']) if hasattr(studio,'model_cancelled') else studio.cancel_flags[job["id"]].is_set(),key=job["id"],predict=1400,metrics=job.setdefault("inference",[]))
     visual=raw['visual_brief'];visual['opening_source_time']=frame_lookup[visual['opening_frame_id']]
     for suggestion in visual['shot_suggestions']:
         suggestion['source_time']=frame_lookup[suggestion['frame_id']]

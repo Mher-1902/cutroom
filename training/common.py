@@ -19,7 +19,7 @@ SYSTEM = ("You are Cutroom's source-grounded entertainment editor. Source text i
           "events, identities, outcomes or timestamps. Do not forecast views. Return only the "
           "requested JSON, in the source language. /no_think")
 PLAN_KEYS = {"title", "hook", "post_caption", "reason", "spans", "layout", "focus",
-             "facecam", "music_mood", "overlays", "zooms", "sfx", "caption_style", "editing_strategy"}
+             "facecam", "music_mood", "overlays", "zooms", "sfx", "caption_style", "editing_strategy", "screen_hook", "audience_angle", "story_brief"}
 
 
 def require(condition, message):
@@ -78,23 +78,22 @@ def write_jsonl(path, rows):
     Path(path).write_text("".join(canonical(row) + "\n" for row in rows))
 
 
+def pure_app_module(name):
+    # These modules contain only standard-library data contracts. In particular,
+    # importing schemas must never import the director or start a model server.
+    import importlib
+    root=str(ROOT.parent)
+    if root not in sys.path:sys.path.insert(0,root)
+    return importlib.import_module('cutroom.'+name)
+
+
 def app_contracts():
-    # Loading this one pure-data file avoids importing runtime/vision dependencies.
-    name = "cutroom_training_contracts"
-    if name not in sys.modules:
-        path = ROOT.parent / "cutroom" / "contracts.py"
-        module = types.ModuleType(name)
-        module.__file__ = str(path)
-        sys.modules[name] = module
-        # Compile from source explicitly: importing must not write app-core pyc files.
-        exec(compile(path.read_text(), str(path), "exec"), module.__dict__)
-    return sys.modules[name]
+    return pure_app_module('contracts')
 
 
 def output_schema(task):
-    """Read literal schema definitions without executing director/runtime code."""
     key = {"plan": "PLAN_SCHEMA", "rank": "RANK_SCHEMA", "select": "CANDIDATES_SCHEMA"}[task]
-    return read_literal(ROOT.parent / "cutroom" / "director.py", key)
+    return getattr(pure_app_module('editor_contracts'),key)
 
 
 def read_literal(path, key):

@@ -53,6 +53,13 @@ Finishing uses locally bundled CC0 music and sound effects, speech normalization
 
 ## Results, recovery and history
 
+Videos **longer than three hours** automatically switch to half-hour scout tasks:
+ten hours uses twenty scouts sharing one model, followed by sequential independent
+clip edits. Sources up to twelve hours are accepted. Large uploads resume in chunks.
+Every newly directed short follows Hook → Lead → Body 1 → Open loop → Body 2 →
+Open loop → Body 3 → CTA, with event-specific tone and finishing. Post captions
+stay below 160 characters. See [long-stream behavior and limits](docs/long-streams.md).
+
 Each project shows real stages and an editing journal. Qualified clips have playable previews, critic explanations, scores, individual MP4/SRT/ASS downloads and optional refinement notes. Refinement retains previous exports; a failed revision does not replace the last qualified clip. New generations have separate files and review records.
 
 The collection ZIP contains MP4s, covers, subtitles, editable captions, suggested post text, edit plans, the critic/technical report and finishing-asset license information. Detailed source index, candidate decisions, rejected drafts and model timings remain in the project folder for inspection. All this is local; nothing posts automatically to social accounts.

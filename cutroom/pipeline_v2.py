@@ -7,6 +7,7 @@ import zipfile
 
 from . import analysis, core, director, render_v2, runtime, source_media, source_cache
 from .contracts import ClipEditPlan, DraftReview, REVIEW_WEIGHTS
+from .source_policy import strategy
 
 
 def calibration_text(index_duration, segments, attention_hint=0,visual=None):
@@ -34,7 +35,8 @@ def combined_review(visual,story,technical):
             raise ValueError("The story critic returned an invalid score")
         metrics[key]=min(metrics[key],value) if key=="pacing" else value
     return {**visual,"metrics":metrics,"score":round(sum(metrics[k]*REVIEW_WEIGHTS[k] for k in metrics)*20),
-            "reject":bool(visual["reject"] or story["reject"] or not technical["passed"]),
+            "reject":bool(visual["reject"] or story["reject"] or not technical["passed"] or
+                          not visual.get('structure_passed',True) or not story.get('structure_passed',True)),
             "reason":str(story["reason"])[:900]+" "+str(visual["reason"])[:900],
             "weakness":str(story["weakness"])[:500]+" "+str(visual["weakness"])[:500],
             "story_critic":story,"technical":technical}
@@ -49,12 +51,16 @@ def package(studio,job,folder,states,index):
                 used[asset['id']]=asset
     report={"pipeline_version":2,"source":job.get("source_metadata",job["source"]),"config":{k:v for k,v in job["config"].items() if k!="youtube_auth"},
             "measured_stage_seconds":job.get('stage_seconds',{}),"analysis_reused_from":job.get('analysis_reused_from'),
+            "processing_strategy":job.get('processing_strategy'),"scout_progress":job.get('scout_progress'),
+            "resource_metrics":job.get('resource_metrics'),
             "models":runtime.profile(studio.data),"rubric_weights":REVIEW_WEIGHTS,
             "score_note":"Editorial quality out of 100. Future views are uncertain.",
             "originality":{"declared_source_origin":job["config"].get("source_origin","unknown"),
                 "creator_rewards_eligibility":"not_verified",
                 "note":"Editing, captions, music and reframing do not establish ownership or originality. This report does not certify TikTok Creator Rewards eligibility."},
-            "coverage":{"duration":index["duration"],"frames":index["frames_analyzed"],"fps":index["frame_sampling_fps"],"blocks":len(index["blocks"])},
+            "coverage":{"duration":index["duration"],"frames":index["frames_analyzed"],"fps":index["frame_sampling_fps"],"blocks":len(index["blocks"]),
+                        "complete":index.get('coverage_complete',True),"failed_scouts":index.get('failed_scouts',[]),
+                        "note":index.get('observation_note')},
             "candidates":states,"clips":job["clips"],"validation_scope":job.get('validation_scope'),"failure_summary":job.get('failure_summary'),"inference":job.get("inference",[]),
             "licensed_finishing_assets":list(used.values()),
             "transcript_provenance":json.loads((folder/'transcript-provenance.json').read_text()) if (folder/'transcript-provenance.json').exists() else {'preferred_text':'whisper'},
@@ -167,11 +173,11 @@ def recover_invalid_plans(states):
 
 
 def failure_summary(states):
-    unfinished = sum(s.get('status') == 'review_error' for s in states.values())
+    unfinished = sum(s.get('status') in {'review_error','task_error'} for s in states.values())
     if unfinished:
         return {'stage':'review','unfinished_reviews':unfinished,
-                'message':f'{unfinished} rendered drafts are saved, but their AI reviews did not finish. '
-                          'Resume run retries the unfinished reviews using the saved video. Other rejected edits remain in the editing report.'}
+                'message':f'{unfinished} clip tasks did not finish. Their completed checkpoints and any rendered drafts are saved. '
+                          'Resume run retries the unfinished tasks. Other rejected edits remain in the editing report.'}
     planned = sum(bool(s.get('revisions')) for s in states.values())
     invalid = [s for s in states.values() if s.get('error') and not s.get('revisions')]
     if not planned and invalid:
@@ -204,6 +210,9 @@ def prepare_initial_pool(studio,job,source,candidates,index,segments,metadata,fo
     studio.update(job,stage='Inspecting selected moments')
     for candidate,state in chosen:
         studio.check_cancel(job['id'])
+        if job.get('processing_strategy',{}).get('mode')=='long_stream' and not candidate.get('speech_verified'):
+            from .longform import verified_speech
+            verified_speech(studio,job,source,folder,segments,candidate,metadata,index['language'])
         analysis.densify_regions(studio,job,folder,candidate,index)
         candidate['fine_evidence']=state.get('candidate',{}).get('fine_evidence') or candidate.get('fine_evidence')
         if not candidate['fine_evidence']:
@@ -217,7 +226,8 @@ def prepare_initial_pool(studio,job,source,candidates,index,segments,metadata,fo
         studio.check_cancel(job['id'])
         path=folder/f"plan-{candidate['id']}-r0.json"
         if path.exists():continue
-        aligned=analysis.align_candidate(studio,job,folder,folder/'speech.wav',segments,candidate,index['language'])
+        audio_source=source if job.get('processing_strategy',{}).get('mode')=='long_stream' else folder/'speech.wav'
+        aligned=analysis.align_candidate(studio,job,folder,audio_source,segments,candidate,index['language'])
         try:
             plan=director.make_plan(studio,job,candidate,index,aligned,previous=state.get('latest_plan'))
             runtime.atomic_json(path,plan)
@@ -247,7 +257,8 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
         runtime.atomic_json(plan_path,plan)
     runtime.unload()
     studio.event(job,"Aligning speech precisely for "+candidate["title"])
-    aligned=analysis.align_candidate(studio,job,folder,folder/"speech.wav",segments,candidate,index["language"])
+    audio_source=source if job.get('processing_strategy',{}).get('mode')=='long_stream' else folder/'speech.wav'
+    aligned=analysis.align_candidate(studio,job,folder,audio_source,segments,candidate,index["language"])
     history=state.setdefault("revisions",[])
     for offset in range(3):
         revision=starting_revision+offset
@@ -307,6 +318,20 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
     return None
 
 
+def process_candidate(studio,job,source,candidate,index,segments,metadata,folder,states):
+    """One child's entire lifecycle; callers isolate and retry this unit."""
+    state=states[candidate['id']]
+    if not (folder/f"plan-{candidate['id']}-r0.json").exists():
+        prepare_initial_pool(studio,job,source,[candidate],index,segments,metadata,folder,states)
+        if state['status']=='rejected':return None
+    planned=json.loads((folder/f"plan-{candidate['id']}-r0.json").read_text())
+    if any(core.overlap_fraction(planned,clip)>.20 for clip in job['clips']):
+        state['status']='duplicate'
+        checkpoint_candidate(folder,candidate['id'],state)
+        return None
+    return work_candidate(studio,job,source,candidate,index,segments,metadata,folder,state)
+
+
 def pipeline(studio,job):
     folder=studio.jobs_dir/job["id"]
     studio.update(job,stage="Importing",progress=2)
@@ -315,12 +340,33 @@ def pipeline(studio,job):
     source=analysis.normalize_source(studio,job,source,folder)
     job["source_file"]=str(source)
     metadata=analysis.inspect_source(source,lambda args:studio.run(job,args))
+    processing=strategy(metadata['duration'])
+    previous=job.get('processing_strategy')
+    studio.update(job,processing_strategy=processing)
+    long=processing['mode']=='long_stream'
+    if long:
+        from . import longform
+        identity=source_cache.fingerprint(source)
+        if job.get('analysis_source_fingerprint') not in (None,identity):
+            raise ValueError('The source file changed since analysis. Start a new project; the previous exports remain available.')
+        studio.update(job,analysis_source_fingerprint=identity)
+        longform_store = longform.store(job,source,folder)
+        longform_store.recover_running()
+        from .resources import Governor
+        if job['id'] not in studio.governors:
+            studio.governors[job['id']]=Governor(studio,job)
+        if previous!=processing:
+            studio.event(job,f"Long-stream mode enabled automatically: {processing['scout_count']} half-hour scouts. Heavy work runs one task at a time.")
     if metadata['duration']<job['config']['min_duration']:
         raise ValueError('The source is shorter than the chosen minimum clip length. Choose a shorter duration or a longer source; short events are not padded.')
     studio.update(job,metadata=metadata,progress=7,stage="Transcribing")
-    source_cache.restore(studio,job,source,metadata,folder)
+    if not long:source_cache.restore(studio,job,source,metadata,folder)
     runtime.unload()
-    segments,language=analysis.transcribe(studio,job,source,folder,metadata)
+    if long:
+        from . import longform
+        segments,language=longform.prepare_speech(studio,job,source,folder,metadata)
+    else:
+        segments,language=analysis.transcribe(studio,job,source,folder,metadata)
     studio.update(job,language=language,progress=14)
     chosen=runtime.profile(studio.data)
     if not chosen.get("verified"):
@@ -336,7 +382,7 @@ def pipeline(studio,job):
     job["config"].update(model=chosen["director"],judge_model=runtime.VISION_MODEL)
     job['config'].setdefault('video_encoder','auto')
     studio.update(job,stage="Analyzing full video",progress=18)
-    index=analysis.build_index(studio,job,source,folder,metadata,segments,language)
+    index=(longform.build_index if long else analysis.build_index)(studio,job,source,folder,metadata,segments,language)
     if job["config"].get("content_mode")!="auto":
         index["mode"]=job["config"]["content_mode"]
     studio.update(job,stage="Finding complete moments",progress=40)
@@ -346,7 +392,14 @@ def pipeline(studio,job):
     if recover_invalid_plans(states):
         runtime.atomic_json(states_path, states)
         studio.event(job, 'Retrying invalid edit plans with the corrected planner. Saved import, transcript and scene analysis are reused.')
-    prepare_initial_pool(studio,job,source,candidates,index,segments,metadata,folder,states)
+    tasks=longform.store(job,source,folder) if long else None
+    if tasks:
+        for candidate in candidates:
+            ident='clip-'+candidate['id'];tasks.ensure(ident,'clip')
+            recovered=tasks.get(ident)
+            if recovered['status']=='complete' and recovered['result'] and not any(c['id']==candidate['id'] for c in job['clips']):
+                job['clips'].append(recovered['result'])
+                studio.event(job,'Recovered a completed clip export from its durable task checkpoint.')
     studio.update(job,candidate_count=len(candidates),stage="Editing & reviewing",progress=50)
     for position,candidate in enumerate(candidates):
         studio.check_cancel(job["id"])
@@ -356,16 +409,11 @@ def pipeline(studio,job):
         state=states.setdefault(candidate["id"],{"candidate":candidate,"status":"pending","revisions":[]})
         if state["status"] in {"qualified","rejected","duplicate"}:
             continue
-        if not (folder/f"plan-{candidate['id']}-r0.json").exists():
-            prepare_initial_pool(studio,job,source,candidates[position:],index,segments,metadata,folder,states)
-            if state['status']=='rejected':continue
-        planned=json.loads((folder/f"plan-{candidate['id']}-r0.json").read_text())
-        if any(core.overlap_fraction(planned,clip)>.20 for clip in job['clips']):
-            state['status']='duplicate'
-            runtime.atomic_json(states_path,states)
-            continue
         try:
-            clip=work_candidate(studio,job,source,candidate,index,segments,metadata,folder,state)
+            # Planning, ASR, rendering and review all belong to this child.
+            # A child failure must not prevent another candidate from running.
+            operation=lambda:process_candidate(studio,job,source,candidate,index,segments,metadata,folder,states)
+            clip=tasks.run(studio,job,'clip-'+candidate['id'],'clip',operation) if tasks else operation()
             if clip:
                 job["clips"].append(clip)
                 studio.event(job,f"Qualified clip {len(job['clips'])}/{job['config']['count']}: {clip['title']} ({clip['score']}/100).")
@@ -374,7 +422,10 @@ def pipeline(studio,job):
         except (ValueError,KeyError) as exc:
             state.update(status="rejected",error=str(exc))
             studio.event(job,"Rejected an invalid edit plan: "+str(exc)[:500])
-        except RuntimeError as exc:
+        except Exception as exc:
+            studio.check_cancel(job['id'])
+            from .resources import ResourcePause
+            if isinstance(exc,ResourcePause):raise
             if isinstance(exc,runtime.vllm_backend.IncompleteResponse):
                 state.update(status='review_error',error='The AI review did not finish after its automatic retry. The rendered draft is saved.')
                 studio.event(job,'A draft is saved for review recovery. Continuing with the next candidate.')
@@ -382,8 +433,9 @@ def pipeline(studio,job):
                 state.update(status="rejected",error=str(exc))
                 studio.event(job,str(exc))
             else:
-                runtime.atomic_json(states_path,states)
-                raise
+                state.update(status='task_error',error=str(exc)[-1200:])
+                studio.event(job,'This clip task failed; its saved drafts are preserved. Continuing with the next independent candidate. '+str(exc)[-250:])
+                runtime.unload()
         runtime.atomic_json(states_path,states)
         studio.update(job,progress=min(97,50+round(45*(position+1)/len(candidates))),reviewed_candidates=position+1)
     if not job["clips"]:
@@ -392,9 +444,12 @@ def pipeline(studio,job):
         package(studio,job,folder,states,index)
         raise RuntimeError(summary['message'])
     studio.update(job,stage="Packaging",progress=98)
+    retryable=any(s.get('status') in {'task_error','review_error'} for s in states.values()) or bool(index.get('failed_scouts') or index.get('failed_speech_chunks'))
+    studio.update(job,has_retryable_tasks=retryable and len(job['clips'])<job['config']['count'])
     package(studio,job,folder,states,index)
     if len(job["clips"])<job["config"]["count"]:
-        studio.event(job,f"{len(job['clips'])} distinct clips passed out of {job['config']['count']} requested. No weaker repeats were added.")
+        note=' Some tasks need attention; Resume unfinished tasks retries them.' if job.get('has_retryable_tasks') else ' No weaker repeats were added.'
+        studio.event(job,f"{len(job['clips'])} distinct clips passed out of {job['config']['count']} requested."+note)
     runtime.unload()
     studio.event(job,"Finished: reviewed MP4s, covers, captions, post text and the complete editing report are ready.")
 

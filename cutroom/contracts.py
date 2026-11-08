@@ -3,6 +3,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 import math
 import uuid
+from .source_policy import MAX_SOURCE_SECONDS
+from .post_copy import caption, TONES
 
 VERSION = 2
 MOODS = {"action", "tension", "comedy", "relaxed", "none"}
@@ -42,7 +44,7 @@ class SceneIndex:
         return {"version": VERSION, **self.__dict__}
 
     def validate(self):
-        number(self.duration, 5, 7200, "source duration")
+        number(self.duration, 5, MAX_SOURCE_SECONDS, "source duration")
         cursor = 0.0
         for block in self.blocks:
             a = number(block["start"], 0, self.duration, "block start")
@@ -62,6 +64,8 @@ class ClipEditPlan:
     @classmethod
     def parse(cls, raw, source_duration, minimum=61, maximum=120, bounds=None):
         raw = deepcopy(raw)
+        if 'title' in raw and not any(c.isalnum() for c in str(raw['title'])):
+            raise ValueError('An edit needs a meaningful title, not punctuation or a placeholder.')
         spans, cursor, mapping = [], 0.0, []
         for item in raw.get("spans", [])[:12]:
             kind = item.get("kind", "normal")
@@ -116,7 +120,8 @@ class ClipEditPlan:
                 raise ValueError("Unsupported overlay kind")
             text = str(item.get("text", "")).strip()[:90]
             if text:
-                overlays.append({"at": at, "duration": duration, "kind": kind, "text": text})
+                overlays.append({"at": at, "duration": duration, "kind": kind, "text": text,
+                                 **({'story_role':item['story_role']} if item.get('story_role') else {})})
         zooms = []
         for item in raw.get("zooms", [])[:8]:
             at = number(item["at"], 0, cursor, "zoom time")
@@ -143,7 +148,7 @@ class ClipEditPlan:
                 overlays.insert(0, {'at': 0, 'duration': min(3, cursor), 'text': text, 'kind': 'hook'})
         result = {"version": VERSION, "id": str(raw.get("id") or uuid.uuid4().hex),
                   "title": str(raw.get("title", "Untitled moment"))[:120], "hook": str(raw.get("hook", ""))[:160],
-                  "post_caption": str(raw.get("post_caption", ""))[:700], "spans": spans, "mapping": mapping,
+                  "post_caption": caption(raw.get("post_caption", "")), "spans": spans, "mapping": mapping,
                   "duration": cursor, "start": min(s["start"] for s in normal), "end": max(s["end"] for s in normal),
                   "layout": layout, "focus": rect(raw.get("focus", [.1, .05, .8, .9])),
                   "facecam": rect(raw["facecam"]) if raw.get("facecam") else None,
@@ -166,6 +171,15 @@ class ClipEditPlan:
             if strategy.get('content_type') not in {'creator','challenge','reaction','gameplay','conversation','tutorial','story','mixed'} or strategy.get('pacing') not in {'patient','balanced','brisk','varied'}:
                 raise ValueError('Unknown editorial strategy')
             result['editing_strategy']={k:str(strategy.get(k,''))[:700] for k in ('content_type','pacing','reason')}
+            if strategy.get('tone'):
+                if strategy['tone'] not in TONES:raise ValueError('Unknown emotional tone')
+                result['editing_strategy']['tone']=strategy['tone']
+        if raw.get('story_brief') is not None or raw.get('story_structure') is not None:
+            from .story_structure import compile_story
+            brief=raw.get('story_brief')
+            if brief is None:
+                brief={beat['key']:beat['intent'] for beat in raw['story_structure']}
+            result=compile_story(result,brief)
         return cls(result)
 
     def to_dict(self):
@@ -178,6 +192,8 @@ class DraftReview:
 
     @classmethod
     def parse(cls, raw, duration):
+        if type(raw.get('structure_passed',True)) is not bool:
+            raise ValueError('The structure review must return a boolean decision.')
         metrics = {k: number(raw[k], 1, 5, k) for k in REVIEW_WEIGHTS}
         problems = []
         for item in raw.get("problems", [])[:8]:
@@ -187,6 +203,7 @@ class DraftReview:
             problems.append({"at": number(item.get("at", 0), 0, duration, "review timestamp"),
                              "issue": str(item.get("issue", ""))[:400], "action": action})
         return cls({"version": VERSION, "score": round(sum(metrics[k] * REVIEW_WEIGHTS[k] for k in metrics) * 20),
+                    "structure_passed":raw.get('structure_passed',True),
                     "metrics": metrics, "reason": str(raw.get("reason", ""))[:1500],
                     "weakness": str(raw.get("weakness", ""))[:1000], "reject": bool(raw.get("reject", False)),
                     "problems": problems})

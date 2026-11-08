@@ -38,10 +38,13 @@ class Studio:
         self.uploads = self.data / "uploads"
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.uploads.mkdir(parents=True, exist_ok=True)
+        from .uploads import UploadStore
+        self.upload_store=UploadStore(self.uploads)
         self.lock = threading.RLock()
         self.jobs = {}
         self.cancel_flags = {}
         self.processes = {}
+        self.governors = {}
         self.setup_state = {"running": False, "events": [], "error": None}
         for path in self.jobs_dir.glob("*/job.json"):
             try:
@@ -95,7 +98,8 @@ class Studio:
     def uploaded(self, upload_id):
         if not isinstance(upload_id, str) or len(upload_id) != 32 or any(c not in "0123456789abcdef" for c in upload_id):
             raise ValueError("Upload not found.")
-        matches = list(self.uploads.glob(upload_id + ".*"))
+        from .uploads import EXTENSIONS
+        matches = [path for path in self.uploads.glob(upload_id + ".*") if path.suffix.lower() in EXTENSIONS]
         if not matches:
             raise ValueError("Upload not found. Select the file again.")
         return matches[0]
@@ -168,9 +172,16 @@ class Studio:
                     pass
             self.event(job, "Cancellation requested. An active model request may need to finish first.")
 
-    def check_cancel(self, ident):
+    def check_cancel(self, ident, resources=True):
         if self.cancel_flags[ident].is_set():
             raise Cancelled()
+        governor = getattr(self, 'governors', {}).get(ident)
+        if resources and governor is not None:
+            governor.check()
+
+    def model_cancelled(self, ident):
+        self.check_cancel(ident)
+        return False
 
     def run(self, job, args, timeout=7200, include_stderr=False):
         self.check_cancel(job["id"])
@@ -179,17 +190,33 @@ class Studio:
         env = dict(os.environ, HF_HOME=str(self.data / "models" / "huggingface"),
                    HF_HUB_DISABLE_TELEMETRY='1',DO_NOT_TRACK='1',
                    TOKENIZERS_PARALLELISM="false", MPLCONFIGDIR=str(self.data / "cache" / "matplotlib"),
-                   OMP_NUM_THREADS="4")
+                   OMP_NUM_THREADS="2" if job.get('processing_strategy',{}).get('mode')=='long_stream' else "4")
         with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
                               cwd=str(self.root), env=env) as process:
             with self.lock:
                 self.processes[job["id"]] = process
             try:
-                out, err = process.communicate(timeout=timeout)
+                deadline = time.monotonic() + timeout
+                while True:
+                    try:
+                        out, err = process.communicate(timeout=min(2, max(.01, deadline-time.monotonic())))
+                        break
+                    except subprocess.TimeoutExpired:
+                        self.check_cancel(job['id'])
+                        if time.monotonic() >= deadline:
+                            raise
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 out, err = process.communicate()
                 raise RuntimeError(f"{Path(args[0]).name} exceeded its time limit.")
+            except BaseException:
+                if process.poll() is None:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate()
+                raise
             finally:
                 with self.lock:
                     self.processes.pop(job["id"], None)
@@ -205,11 +232,19 @@ class Studio:
             try:
                 self.check_cancel(ident)
                 self.update(job, status="running", stage="Importing", progress=3)
-                if job.get("pending_refine"):
-                    from .pipeline_v2 import refine
-                    refine(self,job)
-                else:
-                    self.pipeline(job)
+                from .resources import ResourcePause, Governor
+                while True:
+                    try:
+                        if job.get('pending_refine'):
+                            from .pipeline_v2 import refine
+                            if job.get('processing_strategy',{}).get('mode')=='long_stream' and ident not in self.governors:
+                                self.governors[ident]=Governor(self,job)
+                            refine(self,job)
+                        else:
+                            self.pipeline(job)
+                        break
+                    except ResourcePause:
+                        self.governors[ident].cool_down()
                 self.update(job, status="complete", stage="Ready to review", progress=100)
             except Cancelled:
                 self.update(job, status="cancelled", stage="Cancelled")
@@ -220,6 +255,7 @@ class Studio:
                     self.update(job, status="failed", stage="Needs attention", error=str(exc)[-2500:])
                     self.event(job, "Processing stopped: " + str(exc))
             finally:
+                self.governors.pop(ident, None)
                 if job.get('pipeline_version',1)==2:
                     try:
                         runtime.unload()
@@ -236,7 +272,8 @@ class Studio:
     def resume(self, ident):
         with self.lock:
             job = self.jobs.get(ident)
-            if not job or job["status"] not in {"failed","cancelled","interrupted"}:
+            if not job or not (job["status"] in {"failed","cancelled","interrupted"} or
+                               job['status']=='complete' and job.get('has_retryable_tasks')):
                 raise ValueError("Only an interrupted, failed or cancelled run can be resumed.")
             if job.get("pipeline_version",1) != 2:
                 raise ValueError("Legacy projects remain playable. Start a v2 project for new generation.")

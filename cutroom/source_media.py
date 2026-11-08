@@ -5,10 +5,12 @@ import os
 from pathlib import Path
 import re
 import sys
+import shutil
 from urllib.parse import parse_qs, urlparse
 
 from .core import youtube_url
 from .local_models import binary
+from .source_policy import strategy
 
 
 def normalize_url(url):
@@ -106,12 +108,21 @@ def import_source(studio, job):
     try:
         raw = json.loads(run(base + ["--skip-download", "--dump-single-json", "--", url]))
         duration = float(raw.get("duration") or 0)
-        if not 5 < duration <= 7200 or raw.get("is_live"):
-            raise ValueError("Choose a completed video up to two hours long.")
+        processing = strategy(duration)
+        if raw.get("is_live"):
+            raise ValueError("Choose a completed recording; ongoing live streams are not supported.")
+        studio.update(job, processing_strategy=processing)
+        if processing['mode']=='long_stream':
+            studio.event(job, f"Long-stream mode enabled automatically: {processing['scout_count']} half-hour scout tasks, sharing one model sequentially.")
         audio = select_audio(raw)
         selector = f"bv[height<=1080]+{audio}/b[height<=1080]" if audio else "bv[height<=1080]+ba/b[height<=1080]"
         studio.event(job, "Downloading the original-language video and audio tracks.")
-        run(base + ["--max-filesize", "4G", "-f", selector, "--merge-output-format", "mp4", "-o", str(cache / "source.%(ext)s"), "--", url])
+        free = shutil.disk_usage(cache).free
+        reserve = 4 * 1024 ** 3
+        if free <= reserve:
+            raise ValueError('Free at least 4 GB of working space before importing a video.')
+        budget = min(64 * 1024 ** 3, free-reserve)
+        run(base + ["--max-filesize", str(budget), "-f", selector, "--merge-output-format", "mp4", "-o", str(cache / "source.%(ext)s"), "--", url])
     except RuntimeError as exc:
         raise RuntimeError(import_error(exc,job['config'])) from exc
     files = [p for p in cache.glob("source.*") if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}]

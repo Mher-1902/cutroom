@@ -8,6 +8,7 @@ import wave
 
 from .core import make_ass
 from .local_models import binary
+from .source_policy import MAX_SOURCE_SECONDS
 
 
 def probe(path, run):
@@ -17,8 +18,8 @@ def probe(path, run):
     if not videos or not audio:
         raise ValueError("The source needs both video and spoken audio.")
     duration = float(payload["format"].get("duration", 0))
-    if not 5 < duration <= 7200:
-        raise ValueError("Choose a video between 5 seconds and 2 hours long.")
+    if not 5 < duration <= MAX_SOURCE_SECONDS:
+        raise ValueError("Choose a video longer than 5 seconds and up to 12 hours.")
     return {"duration": duration, "width": videos[0]["width"], "height": videos[0]["height"]}
 
 

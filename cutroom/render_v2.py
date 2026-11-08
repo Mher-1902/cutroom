@@ -224,12 +224,12 @@ def layout_filter(label, out, plan, width, height, index, span, metadata):
             f"[{stem}back][{stem}front]overlay=(W-w)/2:(H-h)/2,setsar=1{out}")
 
 
-def encoder_options(encoder,final,width):
+def encoder_options(encoder,final,width,threads=6):
     if encoder=='h264_videotoolbox':
         bitrate='16M' if width>=1080 else '8M'
         return ['-c:v','h264_videotoolbox','-allow_sw','0','-profile:v','high','-b:v',bitrate,
                 '-realtime','0','-prio_speed','0','-pix_fmt','yuv420p']
-    return ['-c:v','libx264','-threads','6','-preset','slow' if final else 'veryfast',
+    return ['-c:v','libx264','-threads',str(threads),'-preset','slow' if final else 'veryfast',
             '-crf','18' if final else '25','-pix_fmt','yuv420p']
 
 
@@ -262,7 +262,8 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
     height = round(width*16/9/2)*2
     left = min(s["start"] for s in plan["spans"])
     right = max(s["end"] if s["kind"] != "freeze" else s["start"]+.1 for s in plan["spans"])
-    command = [local_models.binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-filter_complex_threads", "4", "-y", "-ss", str(left), "-t", str(right-left+.25), "-i", str(source),
+    cool=job.get('processing_strategy',{}).get('mode')=='long_stream'
+    command = [local_models.binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-filter_complex_threads", "2" if cool else "4", "-y", "-ss", str(left), "-t", str(right-left+.25), "-i", str(source),
                "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
     filters, inputs = [], []
     for i, span in enumerate(plan["spans"]):
@@ -327,16 +328,18 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:duration=first:normalize=0,alimiter=limit=.89[outa]")
     command += ["-filter_complex", ";".join(filters), "-map", "[outv]", "-map", "[outa]", "-t", str(plan["duration"])]
     video_start=len(command)
-    command+=encoder_options(encoder,final,width)
+    command+=encoder_options(encoder,final,width,2 if cool else 6)
     video_end=len(command)
     command += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(temporary)]
     try:
         try:
             run(command)
-        except RuntimeError:
+        except RuntimeError as exc:
+            from .resources import ResourcePause
+            if isinstance(exc,ResourcePause):raise
             if encoder!='h264_videotoolbox':raise
             studio.event(job,'Hardware encoding could not finish; retrying this render with the CPU encoder.')
-            command=command[:video_start]+encoder_options('libx264',final,width)+command[video_end:]
+            command=command[:video_start]+encoder_options('libx264',final,width,2 if cool else 6)+command[video_end:]
             encoder='libx264';run(command)
         probe=json.loads(run([local_models.binary("ffprobe"),"-v","error","-show_format","-of","json",str(temporary)]))
         if abs(float(probe["format"]["duration"])-plan["duration"])>.25:

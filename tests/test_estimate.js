@@ -22,6 +22,17 @@ test('all ten counts produce ordered planning ranges', () => {
 });
 
 test('invalid count and source length do not produce a misleading estimate', () => {
-  for (const [minutes, count] of [[0, 1], [121, 1], [NaN, 1], [60, 0], [60, 11], [60, 1.5]])
+  for (const [minutes, count] of [[0, 1], [721, 1], [NaN, 1], [60, 0], [60, 11], [60, 1.5]])
     assert.equal(planner.estimate(minutes, count), null);
+});
+
+test('long stream routing is automatic above three hours and never promises an unmeasured latency',()=>{
+  assert.notEqual(planner.estimate(180,5).mode,'long_stream');
+  for(const [minutes,count]of [[181,7],[240,8],[600,20],[720,24]]){
+    const value=planner.estimate(minutes,5);
+    assert.equal(value.mode,'long_stream');assert.equal(value.scoutCount,count);
+    assert.equal(value.heavyConcurrency,1);assert.equal(value.calibrated,false);
+    assert.match(planner.range(value),/timing uncalibrated/);
+    assert.equal(value.analysisLow,undefined);
+  }
 });

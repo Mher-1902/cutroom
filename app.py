@@ -55,6 +55,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/state":
                 self.json_response({"token": TOKEN, "version":2,"health": runtime.health(STUDIO.data),
                                     "setup": STUDIO.setup_state, "jobs": STUDIO.list_jobs()})
+            elif re.fullmatch(r'/api/uploads/[a-f0-9]{32}',path):
+                self.json_response(STUDIO.upload_store.status(path.split('/')[-1]))
+            elif re.fullmatch(r'/api/jobs/[a-f0-9]{32}/tasks',path):
+                ident=path.split('/')[3]
+                STUDIO.get(ident)
+                from cutroom.task_store import TaskStore
+                self.json_response({'tasks':TaskStore.snapshot(STUDIO.jobs_dir/ident)})
             elif path.startswith("/api/jobs/"):
                 self.json_response(STUDIO.get(path.split("/")[-1]))
             elif path.startswith("/files/"):
@@ -89,12 +96,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/upload":
                 self.upload()
                 return
+            if re.fullmatch(r'/api/uploads/[a-f0-9]{32}/chunk',path):
+                length=int(self.headers.get('Content-Length',0))
+                offset=int(parse_qs(urlparse(self.path).query).get('offset',['-1'])[0])
+                result,consumed=STUDIO.upload_store.append(path.split('/')[3],offset,length,self.rfile)
+                if not consumed:self.close_connection=True
+                self.json_response(result)
+                return
             length = int(self.headers.get("Content-Length", 0))
             if length > 20000:
                 raise ValueError("Request is too large.")
             raw = json.loads(self.rfile.read(length) or b"{}")
             if path == "/api/jobs":
                 self.json_response(STUDIO.create(raw), 201)
+            elif path == '/api/uploads':
+                self.json_response(STUDIO.upload_store.create(raw.get('name',''),raw.get('bytes')),201)
             elif path == "/api/setup":
                 STUDIO.start_setup()
                 self.json_response({"ok": True})

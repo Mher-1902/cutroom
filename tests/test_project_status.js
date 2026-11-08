@@ -31,3 +31,16 @@ test('an incomplete review explains recovery without exposing model jargon',()=>
  assert.match(view.detail,/drafts are saved/);assert.match(view.detail,/Resume run/);
  assert.doesNotMatch(view.detail,/vLLM|output limit/);
 });
+test('automatic long-stream coverage shows failures and completed shorts accurately',()=>{
+ const job={processing_strategy:{mode:'long_stream',scout_count:20},scout_progress:{total:20,complete:14,failed:1},clips:[{}],config:{count:5}};
+ assert.match(status.scouting(job),/14\/20 sections scouted/);
+ assert.match(status.scouting(job),/1 need attention/);
+ assert.match(status.scouting(job),/1\/5 shorts ready/);
+ assert.match(status.scouting(job),/one heavy task/);
+ assert.equal(status.scouting({}),'');
+});
+test('resource cooldown is an automatic pause with saved progress',()=>{
+ const job={id:'x',status:'running',progress:32,resource_pause:'Your Mac needs a cooling break'};
+ const view=status.describe(job,[job],{});
+ assert.match(view.stage,/cooling/);assert.match(view.detail,/resumes/);
+});

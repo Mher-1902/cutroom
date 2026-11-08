@@ -1,10 +1,17 @@
 name: Source checks
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -14,7 +21,11 @@ jobs:
         with:
           node-version: '22'
       - name: Install FFmpeg for container timestamp regression
+        if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg on macOS
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
       - name: Application checks
         run: python -m unittest discover -s tests -v
       - name: Training data guard checks (CPU only)
@@ -24,4 +35,25 @@ jobs:
           python -m compileall -q app.py cutroom training tests
           node --check static/app.js
           node --check static/estimate.js
-          node --test tests/test_estimate.js tests/test_project_status.js
+          node --test tests/test_*.js
+      - name: Compile native macOS helpers and desktop shell
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p /tmp/cutroom-native-check
+          swiftc native/VisionProbe.swift -O -o /tmp/cutroom-native-check/vision-probe
+          swiftc native/ResourceProbe.swift -O -o /tmp/cutroom-native-check/resource-probe
+          /tmp/cutroom-native-check/resource-probe
+          swiftc native/DesktopApp.swift -O -o /tmp/cutroom-native-check/Cutroom
+  deliver-source:
+    needs: checks
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package tracked source after successful checks
+        run: git archive --format=zip --prefix=cutroom/ HEAD -o cutroom-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cutroom-source-${{ github.sha }}
+          path: cutroom-source.zip
+          retention-days: 14
