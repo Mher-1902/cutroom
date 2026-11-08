@@ -12,6 +12,7 @@ function updateDurationControls(){
   const [low,high]=selectedDuration();
   $('duration-max').setCustomValidity(custom&&high<low?'Maximum length must be at least the minimum.':'');
   $('duration-summary').textContent=low>=15&&high>=low&&high<=180?`${low}–${high} seconds each`:'Choose 15–180 seconds';
+  $('duration-60-90').setAttribute('aria-pressed',String($('duration').value==='60,90'));
   updatePlanningEstimate();
 }
 function updatePlanningEstimate(){
@@ -37,7 +38,7 @@ function renderDraft(job){
   $('draft-preview').hidden=!visible;
   if(!visible)return;
   $('draft-title').textContent=draft.title;
-  $('draft-note').textContent=draft.reviewing?'Draft preview · Review in progress. Finished exports appear in the collection below.':`Saved ${draft.final?'export':'draft'} preview · Editorial score ${draft.score}/100 · ${draft.rejected?'Needs further revision.':'Awaiting final qualification.'}`;
+  $('draft-note').textContent=draft.reviewing?(['running','queued'].includes(job.status)?'Draft preview · Review in progress. Finished exports appear in the collection below.':'Saved draft · Review paused. Resume run continues from saved progress.'):`Saved ${draft.final?'export':'draft'} preview · Editorial score ${draft.score}/100 · ${draft.needs_revision||draft.rejected||draft.score<Math.max(70,job.config.min_score)?'Needs further revision.':'Awaiting final qualification.'}`;
   if(draftKey!==draft.video){draftKey=draft.video;$('draft-video').src=draft.video;}
 }
 let journalProject=null,journalKey='';
@@ -82,4 +83,5 @@ function setSource(mode){sourceMode=mode;$('url-source').hidden=mode!=='youtube'
 $('youtube-tab').addEventListener('click',()=>setSource('youtube'));$('upload-tab').addEventListener('click',()=>setSource('upload'));$('video-file').addEventListener('change',()=>{uploadVideo=null;$('file-label').textContent=$('video-file').files[0]?.name||'↑ Choose a video from your Mac';});$('music-file').addEventListener('change',()=>uploadMusic=null);$('music').addEventListener('change',()=>$('music-file-row').hidden=$('music').value!=='upload');$('clip-count').addEventListener('change',updatePlanningEstimate);$('estimate-source-minutes').addEventListener('input',updatePlanningEstimate);$('duration').addEventListener('change',updateDurationControls);$('duration-min').addEventListener('input',updateDurationControls);$('duration-max').addEventListener('input',updateDurationControls);
 $('project-form').addEventListener('submit',async e=>{e.preventDefault();if(submitting)return;if(!state?.health.ready){$('models-dialog').showModal();return;}const[min,max]=selectedDuration();const payload={pipeline_version:2,count:Number($('clip-count').value),min_duration:min,max_duration:max,brief:$('brief').value,content_mode:$('content-mode').value,source_origin:$('source-origin').value,style:$('caption-style').value,layout:$('layout').value,music:$('music').value,sfx:$('sfx').checked,resolution:Number($('resolution').value),language:$('language').value,min_score:70,watermark_text:$('watermark-text').value.trim(),watermark_position:$('watermark-position').value,watermark_opacity:Number($('watermark-opacity').value)};submitting=true;const buttons=[...e.target.querySelectorAll('[type=submit]')];buttons.forEach(b=>b.disabled=true);try{if(sourceMode==='upload'){const file=$('video-file').files[0];if(!file)throw new Error('Choose a video file first.');toast('Uploading your video to the local studio…');uploadVideo=uploadVideo||await upload(file);payload.upload_id=uploadVideo.id;payload.source_name=file.name;}else{payload.url=$('video-url').value.trim();if(!payload.url)throw new Error('Paste a YouTube video link first.');if($('auth-consent').checked)payload.youtube_auth={consent:true,browser:$('auth-browser').value};}if(payload.music==='upload'){const file=$('music-file').files[0];if(!file)throw new Error('Choose your music track first.');uploadMusic=uploadMusic||await upload(file);payload.music_upload=uploadMusic.id;}const job=await api('/api/jobs',payload);state.jobs.unshift(job);openProject(job.id);}catch(error){toast(error.message);}finally{submitting=false;buttons.forEach(b=>b.disabled=false);}});
 updateDurationControls();
+$('duration-60-90').addEventListener('click',()=>{$('duration').value='60,90';updateDurationControls();});
 refresh();

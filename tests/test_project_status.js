@@ -17,4 +17,17 @@ test('a running job distinguishes memory waiting from numerical progress',()=>{
 test('import failures show the actual blocker immediately',()=>{
  const job={id:'failed',status:'failed',stage:'Needs attention',progress:2,error:'YouTube requires an authorized session'};
  assert.match(status.describe(job,[job],{}).detail,/authorized session/);
+ assert.equal(status.describe(job,[job],{}).progressLabel,'Stopped');
+});
+test('planning failures display a stopped state instead of a stuck percentage',()=>{
+ const job={id:'failed',status:'failed',stage:'Needs attention',progress:50,error:'No videos reached rendering',failure_summary:{stage:'planning'}};
+ const view=status.describe(job,[job],{});
+ assert.equal(view.stage,'Edit planning failed');assert.equal(view.progressLabel,'Stopped');
+ assert.match(view.detail,/No videos reached rendering/);
+});
+test('an incomplete review explains recovery without exposing model jargon',()=>{
+ const job={id:'failed',status:'failed',stage:'Needs attention',progress:65,error:'vLLM reached its output limit. The incomplete response was not accepted.'};
+ const view=status.describe(job,[job],{});
+ assert.match(view.detail,/drafts are saved/);assert.match(view.detail,/Resume run/);
+ assert.doesNotMatch(view.detail,/vLLM|output limit/);
 });

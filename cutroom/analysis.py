@@ -6,7 +6,7 @@ from pathlib import Path
 import wave
 
 from . import core, local_models, runtime, scout
-from .contracts import SceneIndex
+from .contracts import SceneIndex, rect
 
 INDEX_SCHEMA = {"type": "object", "properties": {
     "summary": {"type": "string", "maxLength": 240}, "mode": {"type": "string", "enum": ["creator", "reaction", "gameplay", "challenge", "conversation", "tutorial", "story", "mixed"]},
@@ -84,7 +84,7 @@ def normalize_source(studio,job,source,folder):
     return target
 
 
-def contact_sheet(paths, times, output, tile_width=480, columns=3, label_prefix="SOURCE"):
+def contact_sheet(paths, times, output, tile_width=480, columns=3, label_prefix="SOURCE",frame_labels=None):
     from PIL import Image, ImageDraw, ImageFont
     first = Image.open(paths[0])
     height = round(tile_width * first.height / first.width)
@@ -101,7 +101,8 @@ def contact_sheet(paths, times, output, tile_width=480, columns=3, label_prefix=
         image.thumbnail((tile_width, height))
         x, y = i % columns * tile_width, i // columns * (height + label)
         sheet.paste(image, (x + (tile_width - image.width) // 2, y + (height - image.height) // 2))
-        draw.text((x + 8, y + height + 3), f"{label_prefix} {at:.2f}s", fill="#fff1d6", font=font)
+        label_text=f"{frame_labels[i]} · {at:.2f}s" if frame_labels else f"{label_prefix} {at:.2f}s"
+        draw.text((x + 8, y + height + 3), label_text, fill="#fff1d6", font=font)
     sheet.save(output, quality=90)
     return output
 
@@ -377,14 +378,73 @@ def inspect_candidate(studio, job, source, candidate, index, folder):
                         "-vf","fps=4,scale=960:-2","-q:v","3",str(directory/f"w{i}-%03d.jpg")])
         paths = sorted(directory.glob(f"w{i}-*.jpg"))[:12]
         sheets.append(contact_sheet(paths,[left+n/4 for n in range(len(paths))],directory/f"sequence-{i}.jpg",tile_width=384))
-    prompt = (f"Closely examine the dense action/reaction sequences from source event {a:.2f}–{b:.2f}. "
+    # Give the visual co-editor the complete selected event, motion around the
+    # strongest beat/payoff, and a separate approved style example in one call.
+    frames=sorted((folder/'frames').glob('frame-*.jpg'))
+    low=max(0,math.ceil(a-.5));high=min(len(frames)-1,math.floor(b-.5))
+    positions=sorted({round(low+(high-low)*i/7) for i in range(8)})
+    frame_ids=[f'F{i+1:02}' for i in range(len(positions))]
+    frame_times=[n+.5 for n in positions]
+    storyboard=contact_sheet([frames[n] for n in positions],frame_times,directory/'storyboard.jpg',
+                             tile_width=320,columns=4,frame_labels=frame_ids)
+    frame_lookup=dict(zip(frame_ids,frame_times))
+    native_by_frame={}
+    samples=[sample for block in index['blocks'] for sample in block.get('regions',[])]
+    for ident,at in frame_lookup.items():
+        nearest=min(samples,key=lambda sample:abs(sample['at']-(at-.5)),default=None)
+        native_by_frame[ident]=({k:nearest.get(k,[]) for k in ('faces','texts')}
+                               if nearest and abs(nearest['at']-(at-.5))<.6 else {'faces':[],'texts':[]})
+    best=min(range(len(centers)),key=lambda i:abs(sorted(centers)[i]-(cues[0]['at'] if cues else (a+b)/2)))
+    motion=[sheets[best],sheets[-1]] if best!=len(sheets)-1 else [sheets[0],sheets[-1]]
+    images=[storyboard,*motion]
+    reference=studio.data/'style-references/hype-reference.jpg'
+    if reference.is_file():images.append(reference)
+    schema=index_schema(a,b);schema['properties']['events']['maxItems']=3
+    brief={'type':'object','properties':{
+        'opening_frame_id':{'type':'string','enum':frame_ids},
+        'opening_why':{'type':'string','maxLength':140},
+        'audience_angle':{'type':'string','enum':['visual_wow','stakes','surprise','humor','story','useful_tip','emotional']},
+        'suggested_hook':{'type':'string','maxLength':65},
+        'shot_suggestions':{'type':'array','maxItems':3,'items':{'type':'object','properties':{
+            'frame_id':{'type':'string','enum':frame_ids},'framing':{'type':'string','enum':['fit','portrait_left','portrait_center','portrait_right']},
+            'reason':{'type':'string','maxLength':90}},'required':['frame_id','framing','reason']}},
+        'keep_visible':{'type':'array','maxItems':3,'items':{'type':'string','maxLength':70}}},
+        'required':['opening_frame_id','opening_why','audience_angle','suggested_hook','shot_suggestions','keep_visible']}
+    schema['properties']['visual_brief']=brief;schema['required'].append('visual_brief')
+    schema['properties']['focus']['enum']=[[0,0,1,1],[0,0,.3,1],[.35,0,.3,1],[.7,0,.3,1]]
+    prompt = (f"You are the visual co-editor for a high-energy social short from source event {a:.2f}–{b:.2f}. "
+              "The FIRST image is the source storyboard with measured frame IDs. The next TWO images are source motion strips. "
+              +( "The LAST image is an APPROVED STYLE EXAMPLE, NOT source evidence. Borrow its typography/framing/energy, never its people, events, game identity or text as facts about this source. " if reference.is_file() else "")+
+              "Choose the strongest opening VISUAL from the source frame IDs, a fitting audience angle, a short punchy hook, and useful close-up/wide-shot recommendations. "
+              "Describe literal visible details. Do not infer fear, intent or an unseen action; say uncertain when necessary. Shot reasons under ten words. "
               "Times printed on frames are original source times. Check exactly what is revealed, who/what reacts, and whether the apparent payoff actually happens. "
               "Describe the essential setup and visible outcome. Highlight critical framing and existing caption issues. All reported times stay inside this source event.\n"
               "Keep distinct challenges separate at transitions. Name people and amounts only when the timestamped speech or readable source text supports them. "
               "Do not assume the proposed event title is correct. Concise summary under 60 words; descriptions under 20 words.\n"
-              + json.dumps({'start':a,'end':b,'speech':compact_speech(json.loads((folder/'segments.json').read_text()),a,b)},ensure_ascii=False))
-    raw = runtime.chat(runtime.VISION_MODEL,INDEX_SYSTEM,prompt,index_schema(a,b),sheets,
-                       cancelled=lambda:studio.cancel_flags[job["id"]].is_set(),key=job["id"],predict=1500,metrics=job.setdefault("inference",[]))
+              + json.dumps({'start':a,'end':b,'source_frame_ids':frame_lookup,'measured_regions':native_by_frame,
+                            'source_title':job.get('source_metadata',{}).get('title',''),
+                            'speech':compact_speech(json.loads((folder/'segments.json').read_text()),a,b)},ensure_ascii=False))
+    studio.event(job,f'Visual co-editor is viewing {len(positions)} source frames, two motion strips'+(' and the approved hype reference.' if reference.is_file() else '.'))
+    raw = runtime.chat(runtime.VISION_MODEL,INDEX_SYSTEM,prompt,schema,images,
+                       cancelled=lambda:studio.cancel_flags[job["id"]].is_set(),key=job["id"],predict=1400,metrics=job.setdefault("inference",[]))
+    visual=raw['visual_brief'];visual['opening_source_time']=frame_lookup[visual['opening_frame_id']]
+    for suggestion in visual['shot_suggestions']:
+        suggestion['source_time']=frame_lookup[suggestion['frame_id']]
+        faces=native_by_frame[suggestion['frame_id']]['faces']
+        if suggestion['framing']!='fit' and faces:
+            left=min(face[0] for face in faces);right=max(face[0]+face[2] for face in faces)
+            if right-left>.30:
+                suggestion.update(framing='fit',focus=[0,0,1,1])
+            else:
+                center=(left+right)/2
+                suggestion['focus']=[max(0,min(.70,center-.15)),0,.30,1]
+            suggestion['framing_evidence']='Measured source face regions; preserve the visible subjects.'
+    visual.update(source_frame_ids=frame_lookup,reference_attached=reference.is_file(),source_storyboard=str(storyboard.relative_to(folder)))
+    try:raw['focus']=rect(raw['focus'])
+    except (ValueError,TypeError):raw['focus']=[0,0,1,1]
+    if raw.get('facecam'):
+        try:raw['facecam']=rect(raw['facecam'])
+        except (ValueError,TypeError):raw['facecam']=[]
     raw.update(sampling_fps=4,windows=sorted(centers),source_start=a,source_end=b)
     runtime.atomic_json(target,raw)
     return raw

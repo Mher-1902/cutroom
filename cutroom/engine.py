@@ -243,7 +243,7 @@ class Studio:
             if not runtime.health(self.data)["ready"]:
                 raise ValueError("Finish the vLLM Metal setup before resuming generation. Saved progress is preserved.")
             self.cancel_flags[ident] = threading.Event()
-            self.update(job,status="queued",stage="Queued to resume",error=None)
+            self.update(job,status="queued",stage="Queued to resume",error=None,failure_summary=None)
             self.queue.put(ident)
             return deepcopy(job)
 

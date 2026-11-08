@@ -2,6 +2,7 @@
 const CutroomProjectStatus = (() => {
   function importMessage(error){
     const text=error||'Processing stopped. Read the editing journal for details.';
+    if(text.includes('vLLM reached its output limit')||text.includes('vLLM returned incomplete JSON'))return 'The AI review did not finish. Your source, analysis and rendered drafts are saved. Resume run retries the unfinished step; you do not need to upload the video again.';
     if(text.includes('macOS blocked access'))return 'Your browser authorization was saved. macOS is blocking protected browser data. To use browser imports, enable Cutroom in System Settings → Privacy & Security → Full Disk Access, then restart the local studio and retry. This grants broader file access; uploading a video file avoids that permission.';
     return text.replace('In Advanced settings,','In Make it yours → Restricted YouTube video?,');
   }
@@ -14,6 +15,10 @@ const CutroomProjectStatus = (() => {
     if (job.status === 'running' && health.gpu_waiting) return {
       stage: 'Waiting for available model memory', progressLabel: 'Waiting',
       detail: 'Another local model server is still loaded. Progress is saved; processing continues when it closes. Stop & save progress cancels the wait.'
+    };
+    if (job.status === 'failed') return {
+      stage: job.failure_summary?.stage === 'planning' ? 'Edit planning failed' : job.stage,
+      progressLabel: 'Stopped', detail: importMessage(job.error)
     };
     return {stage: job.stage, progressLabel: `${job.progress}%`,
       detail: job.status === 'failed' ? importMessage(job.error) : (job.events?.at(-1)?.message || 'Preparing your project…')};

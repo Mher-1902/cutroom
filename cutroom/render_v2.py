@@ -57,6 +57,24 @@ def source_caption_intervals(index, plan):
     return intervals
 
 
+def overlay_lines(text, size, width=860):
+    """Wrap using the bundled rendered font, not a character-count guess."""
+    try:
+        from PIL import ImageFont
+        font=ImageFont.truetype(str(Path(__file__).resolve().parents[1]/'static/fonts/anton/Anton-Regular.ttf'),size)
+        measure=font.getlength
+    except (ImportError,OSError):
+        measure=lambda value:len(value)*size*.55
+    lines=[];line=''
+    for word in text.split():
+        trial=(line+' '+word).strip()
+        if line and measure(trial)>width:
+            lines.append(line);line=word
+        else:line=trial
+    if line:lines.append(line)
+    return lines
+
+
 def make_ass(plan, segments, index, style="kinetic",watermark=None):
     if style=='auto':
         style=plan.get('caption_style','kinetic')
@@ -96,20 +114,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     animate = "{\\fscx96\\fscy96\\t(0,85,\\fscx100\\fscy100)}" if i == 0 else ""
                     events.append(f"Dialogue: 0,{core.ass_time(a)},{core.ass_time(b)},Captions,,0,0,0,,{animate}{text}")
     for overlay in plan["overlays"]:
-        words = core.ass_escape(overlay["text"]).split()
-        lines, line = [], ""
-        for word in words:
-            if len(line) + len(word) > 25 and line:
-                lines.append(line)
-                line = word
-            else:
-                line += (" " if line else "") + word
-        if line:
-            lines.append(line)
-        text = "\\N".join(lines[:3])
+        hype=plan.get('screen_hook',{}).get('style')=='hype' and overlay['kind']!='label'
+        size=(122 if overlay['kind']=='hook' else 94) if hype else (76 if overlay['kind']=='hook' else 69)
+        visible=overlay['text'].upper() if hype else overlay['text']
+        lines=overlay_lines(visible,size)
+        while len(lines)>3 and size>72:
+            size-=10;lines=overlay_lines(visible,size)
+        emphasis=plan.get('screen_hook',{}).get('emphasis','').upper().strip('.,!?…')
+        painted=[]
+        for line in lines:
+            words=[]
+            for word in line.split():
+                escaped=core.ass_escape(word)
+                if hype and emphasis and word.strip('.,!?…').upper()==emphasis:
+                    escaped='{\\c&HA68BF0&}'+escaped+'{\\c&HFFFFFF&}'
+                words.append(escaped)
+            painted.append(' '.join(words))
+        text = "\\N".join(painted)
         name = "Hook" if overlay["kind"] == "hook" else "Callout"
         a, b = overlay["at"], min(plan["duration"], overlay["at"]+overlay["duration"])
-        animation = "{\\fad(90,130)\\fscx88\\fscy88\\t(0,160,\\fscx100\\fscy100)}"
+        animation = (f"{{\\fs{size}\\bord6\\shad3\\fad(40,100)\\fscx82\\fscy82\\t(0,100,\\fscx108\\fscy108)\\t(100,190,\\fscx100\\fscy100)}}" if hype else
+                     f"{{\\fs{size}\\fad(90,130)\\fscx88\\fscy88\\t(0,160,\\fscx100\\fscy100)}}")
         events.append(f"Dialogue: 1,{core.ass_time(a)},{core.ass_time(b)},{name},,0,0,0,,{animation}{text}")
     for span in plan["spans"]:
         if span["kind"] == "replay":
@@ -230,7 +255,8 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
                 'render_seconds':0,'cache_hit':True,'encoder':completed.get('encoder')}
     started=time.monotonic()
     marker.unlink(missing_ok=True)
-    (folder/(stem+".review.json")).unlink(missing_ok=True)
+    for suffix in ('.review.json', '.visual-review.json', '.story-review.json'):
+        (folder/(stem+suffix)).unlink(missing_ok=True)
     temporary = folder / (stem + ".partial.mp4")
     width = job["config"].get("resolution", 1080) if final else 720
     height = round(width*16/9/2)*2
@@ -247,8 +273,11 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
             filters.append(f"[1:a]atrim=duration={span['duration']:.5f},asetpts=PTS-STARTPTS[a{i}]")
         else:
             filters.append(f"[0:v]trim=start={a:.5f}:end={b:.5f},setpts=(PTS-STARTPTS)/{span['speed']:.5f},fps=30{raw}")
-            audio = "[0:a]" if metadata["has_audio"] else "[1:a]"
-            filters.append(f"{audio}atrim=start={a:.5f}:end={b:.5f},asetpts=PTS-STARTPTS,atempo={span['speed']:.5f},aformat=sample_rates=48000:channel_layouts=stereo[a{i}]")
+            if span.get('mute'):
+                filters.append(f"[1:a]atrim=duration={span['duration']:.5f},asetpts=PTS-STARTPTS[a{i}]")
+            else:
+                audio = "[0:a]" if metadata["has_audio"] else "[1:a]"
+                filters.append(f"{audio}atrim=start={a:.5f}:end={b:.5f},asetpts=PTS-STARTPTS,atempo={span['speed']:.5f},aformat=sample_rates=48000:channel_layouts=stereo[a{i}]")
         filters.append(layout_filter(raw, f"[v{i}]", plan, width, height, index, span, metadata))
         inputs.append(f"[v{i}][a{i}]")
     filters.append("".join(inputs) + f"concat=n={len(inputs)}:v=1:a=1[cutv][cuta]")

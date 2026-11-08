@@ -4,6 +4,7 @@ No Ollama or remote inference fallback. The app-local runtime and model snapshot
 must finish installation before this backend can start.
 """
 import base64
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,13 @@ _log = None
 _model = None
 _state = {}
 _log_start = 0
+
+
+class IncompleteResponse(RuntimeError):
+    def __init__(self, message, partial='', usage=None):
+        super().__init__(message)
+        self.partial = partial
+        self.usage = usage or {}
 
 
 def configure(data):
@@ -165,6 +173,7 @@ def ensure_model(model, cancelled=lambda: False):
                    "--max-model-len", "8192", "--max-num-seqs", "2" if MODELS[model]['vision'] else "1",
                    "--max-num-batched-tokens", "2048" if MODELS[model]['vision'] else "256",
                    "--gpu-memory-utilization", "0.68", "--kv-cache-memory-bytes", "805306368" if MODELS[model]['vision'] else "1207959552",
+                   "--structured-outputs-config", json.dumps({'backend':'xgrammar','disable_any_whitespace':True}),
                    "--disable-log-requests"]
         if MODELS[model]['vision']:
             command+=['--mm-processor-cache-gb','0']
@@ -206,12 +215,23 @@ def payload(model, system, prompt, schema, images, predict):
     for path in images or []:
         data = base64.b64encode(Path(path).read_bytes()).decode()
         content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + data}})
+    schema = deepcopy(schema)
+    def close_objects(value):
+        if isinstance(value, dict):
+            if value.get('type') == 'object' and 'properties' in value:
+                value['additionalProperties'] = False
+            for item in value.values():
+                close_objects(item)
+        elif isinstance(value, list):
+            for item in value:
+                close_objects(item)
+    close_objects(schema)
     return {"model": model, "messages": [{"role": "system", "content": system},
                 {"role": "user", "content": content if images else prompt}],
             "stream": True, "stream_options": {"include_usage": True},
             "temperature": .2, "seed": 41, "max_tokens": predict,
             "chat_template_kwargs": {"enable_thinking": False},
-            "structured_outputs": {"json": schema}}
+            "structured_outputs": {"json": schema, "disable_any_whitespace": True}}
 
 
 def stream(body, cancelled, register, unregister):
@@ -245,7 +265,7 @@ def stream(body, cancelled, register, unregister):
     if cancelled():
         raise RuntimeError("Cancelled")
     if finish == "length":
-        raise RuntimeError("vLLM reached its output limit. The incomplete response was not accepted.")
+        raise IncompleteResponse("vLLM reached its output limit. The incomplete response was not accepted.", ''.join(pieces), usage)
     if finish != "stop":
         raise RuntimeError("vLLM stream ended without a complete response. Resume this stage to retry.")
     try:

@@ -9,6 +9,13 @@ from cutroom import runtime, vllm_backend as backend
 
 
 class NativeBackendTests(unittest.TestCase):
+    def test_structured_responses_cannot_add_unbounded_fields_or_whitespace(self):
+        schema={'type':'object','properties':{'detail':{'type':'object','properties':{'score':{'type':'integer'}}}}}
+        body=backend.payload(runtime.DIRECTORS[0],'system','source',schema,[],300)
+        structured=body['structured_outputs']
+        self.assertTrue(structured['disable_any_whitespace'])
+        self.assertFalse(structured['json']['properties']['detail']['additionalProperties'])
+        self.assertNotIn('additionalProperties',schema)
     def test_other_server_is_detected_without_taking_it_over(self):
         rows='12 /app/vllm serve /model --port 11440\n42 python -m vllm.entrypoints.cli.main serve /other --port 8687\n99 /bin/editor\n'
         with patch.object(backend.subprocess,'check_output',return_value=rows),patch.object(backend,'process_id',return_value=12):

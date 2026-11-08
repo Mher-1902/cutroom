@@ -16,6 +16,42 @@ def plan(spans=None):
                               'focus':[0,0,1,1],'music_mood':'none','layout':'fit'},100,minimum=30).to_dict()
 
 class TimelineTests(unittest.TestCase):
+    def test_muted_cold_open_does_not_invent_or_repeat_spoken_captions(self):
+        raw={'spans':[{'kind':'teaser','start':70,'end':72}, {'start':10,'end':75}],
+             'screen_hook':{'enabled':True,'text':'WAIT… THIS IS GTA?!','style':'hype','emphasis':'GTA'}}
+        edit=ClipEditPlan.parse(raw,100,60,90).to_dict()
+        self.assertTrue(edit['spans'][0]['mute'])
+        self.assertEqual(edit['duration'],67)
+        mapped=remap_words([{'start':70,'end':71,'text':'original dialogue','words':[]}],edit)
+        self.assertEqual(len(mapped),1)
+        self.assertEqual(mapped[0]['start'],62)
+        ass,_,_=render_v2.make_ass(edit,[],{'blocks':[]},style='none')
+        self.assertIn('\\fs122',ass)
+        self.assertIn('GTA?!',ass)
+        self.assertNotIn('REPLAY',ass)
+        with self.assertRaises(ValueError):
+            ClipEditPlan.parse({'spans':[{'kind':'teaser','start':70,'end':74},{'start':10,'end':75}]},100,60,90)
+
+    def test_editor_can_burn_in_a_hook_without_changing_speech_or_duplicating_it(self):
+        raw={'spans':[{'start':10,'end':80}], 'focus':[0,0,1,1],
+             'screen_hook':{'enabled':True,'text':'Who takes the job?'},
+             'overlays':[{'at':0,'duration':3,'kind':'hook','text':'Old hook'}]}
+        edit=ClipEditPlan.parse(raw,100,60,90).to_dict()
+        self.assertEqual([o['text'] for o in edit['overlays']],['Who takes the job?'])
+        ass,mapped,_=render_v2.make_ass(edit,[],{'blocks':[]},style='none')
+        self.assertIn('Who takes the job?',ass)
+        self.assertIn('0:00:00.00,0:00:03.00,Hook',ass)
+        self.assertEqual(mapped,[])
+        raw['screen_hook']={'enabled':False,'text':''}
+        self.assertEqual(ClipEditPlan.parse(raw,100,60,90).to_dict()['overlays'],[])
+
+    def test_sixty_to_ninety_preset_passes_but_outside_lengths_fail(self):
+        for length in (60,75,90):
+            edit=ClipEditPlan.parse({'spans':[{'start':0,'end':length}]},180,60,90).to_dict()
+            self.assertEqual(edit['duration'],length)
+        for length in (59,91):
+            with self.assertRaises(ValueError):
+                ClipEditPlan.parse({'spans':[{'start':0,'end':length}]},180,60,90)
     def test_automatic_treatment_can_differ_for_conversation_and_challenge(self):
         base={'spans':[{'start':10,'end':80}],'layout':'crop','focus':[.3,0,.3,1]}
         talk=ClipEditPlan.parse({**base,'caption_style':'clean','music_mood':'none',

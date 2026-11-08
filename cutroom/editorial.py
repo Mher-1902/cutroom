@@ -5,6 +5,23 @@ not a trained adapter or a claim about future reach.
 """
 
 DIRECTOR_GUIDE = """SHORT-FORM CREATIVE BRIEF:
+Act as an entertainment-focused social media editor, not a report writer.
+Find the audience's immediate reason to stop: visual disbelief, a surprising
+decision, a challenge, tension or a funny reaction. Write hooks as people speak
+on Shorts: punchy, specific, sometimes incredulous. Match the source language.
+For a striking GTA/game visual, an angle such as 'WAIT… THIS IS GTA?!' or
+'THIS LOOKS WAY TOO REAL' can be stronger than a calm philosophical question.
+For reactions, name the actual surprise; for challenges, expose the real stakes.
+Consider visual-wow, curiosity and emotional-reaction angles, then choose the
+strongest supported one. Do not reuse the same headline on every video.
+Use large animated headline text when it helps, and two or three well-timed
+detail/reaction callouts where the footage earns them. A final specific question
+may invite comments. Avoid essay titles, generic motivational wording, requests
+for likes/follows, fabricated stakes and unsupported 'official' or 'real' claims.
+Enthusiasm and opinion are welcome; a question mark does not make a false claim
+truthful. Distinguish visual realism from asserting footage is authentic.
+Open on a strong source visual when possible. A brief teaser may precede the
+chronological story; preserve its meaning and deliver the promised payoff.
 Every short needs a truthful curiosity gap: its opening should make the viewer
 wonder one specific question. Reveal evidence and partial answers as the real
 event unfolds, then answer that question with the retained payoff before ending.
@@ -47,6 +64,11 @@ as well as crops that hide action. Evaluate text against faces, source text and
 the edges of a phone screen. Effects should emphasize real beats and preserve
 emotional timing; do not reward effect count or demand fabricated scenes. Give
 timestamped corrections, not a prediction of views.
+Judge the immediate premise and the promise of the actual on-screen hook, not
+whether the clip explains an entire film, mission or every character's history.
+A reveal can complete a short whose hook promises that reveal; do not demand a
+later escape or unrelated resolution. Original parallel montage is not an
+editing mistake by itself when the retained narration provides a coherent arc.
 """
 
 STYLE_GUIDE = """ADAPT THE EDIT TO THIS PARTICULAR VIDEO AND EVENT:
@@ -71,4 +93,10 @@ Decide pacing, caption treatment, music mood, shot framing and effect density
 from that event. Fast is not always entertaining. The approved portrait preview
 is a visual reference for suitable entertainment clips, not a universal template.
 Respect explicit caption, soundtrack and framing settings over automatic choices.
+For scripted game cinematics and voiceover montages, narrative continuity may
+come from the spoken story across intentionally intercut action. Never invent
+a literal flashback just because a character tells an anecdote. Preserve a
+complete narrated setup and conclusion, and distinguish original montage cuts
+from new cuts that remove essential context. A video made in a game can still
+be a story; visible game graphics alone do not make it a gameplay challenge.
 """

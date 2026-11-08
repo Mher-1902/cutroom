@@ -7,7 +7,7 @@ import time
 import uuid
 
 from . import runtime
-from .contracts import ClipEditPlan, DraftReview, REVIEW_WEIGHTS
+from .contracts import ClipEditPlan, DraftReview, REVIEW_WEIGHTS, rect
 from .analysis import compact_speech
 from .editorial import DIRECTOR_GUIDE, CRITIC_GUIDE, STYLE_GUIDE
 
@@ -23,6 +23,10 @@ RANK_SCHEMA = {"type": "object", "properties": {"ordered_ids": {"type": "array",
     "required": ["ordered_ids", "duplicate_ids", "reason"]}
 
 PLAN_SCHEMA = {"type": "object", "properties": {
+    "audience_angle":{"type":"string","enum":["visual_wow","stakes","surprise","humor","story","useful_tip","emotional"]},
+    "screen_hook": {"type":"object", "properties":{"enabled":{"type":"boolean"},
+        "text":{"type":"string","maxLength":75}, "style":{"type":"string","enum":["hype","clean"]},
+        "emphasis":{"type":"string","maxLength":18}}, "required":["enabled","text","style"]},
     "caption_style": {"type":"string", "enum":["kinetic","clean","none"]},
     "editing_strategy": {"type":"object", "properties":{
         "content_type":{"type":"string","enum":["creator","challenge","reaction","gameplay","conversation","tutorial","story","mixed"]},
@@ -30,7 +34,7 @@ PLAN_SCHEMA = {"type": "object", "properties": {
         "reason":{"type":"string"}}, "required":["content_type","pacing","reason"]},
     "title": {"type": "string"}, "hook": {"type": "string"}, "post_caption": {"type": "string"}, "reason": {"type": "string"},
     "spans": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "properties": {
-        "start": {"type": "number"}, "end": {"type": "number"}, "kind": {"type": "string", "enum": ["normal", "replay", "freeze"]},
+        "start": {"type": "number"}, "end": {"type": "number"}, "kind": {"type": "string", "enum": ["normal", "replay", "freeze", "teaser"]},
         "speed": {"type": "number"}, "duration": {"type": "number"},
         "layout": {"type": "string", "enum": ["fit", "crop"]},
         "focus": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}}}, "required": ["start", "end", "kind", "speed", "duration"]}},
@@ -45,13 +49,13 @@ PLAN_SCHEMA = {"type": "object", "properties": {
         "at": {"type": "number"}, "duration": {"type": "number"}, "scale": {"type": "number"}}, "required": ["at", "duration", "scale"]}},
     "sfx": {"type": "array", "maxItems": 10, "items": {"type": "object", "properties": {
         "at": {"type": "number"}, "kind": {"type": "string", "enum": ["impact", "whoosh", "tick"]}}, "required": ["at", "kind"]}},
-    }, "required": ["title", "hook", "post_caption", "reason", "spans", "layout", "focus", "facecam", "music_mood", "overlays", "zooms", "sfx", "caption_style", "editing_strategy"]}
+    }, "required": ["title", "hook", "screen_hook", "audience_angle", "post_caption", "reason", "spans", "layout", "focus", "facecam", "music_mood", "overlays", "zooms", "sfx", "caption_style", "editing_strategy"]}
 
 REVIEW_SCHEMA = {"type": "object", "properties": {
     **{k: {"type": "integer", "minimum": 1, "maximum": 5} for k in REVIEW_WEIGHTS},
-    "reason": {"type": "string"}, "weakness": {"type": "string"}, "reject": {"type": "boolean"},
-    "problems": {"type": "array", "items": {"type": "object", "properties": {
-        "at": {"type": "number"}, "issue": {"type": "string"}, "action": {"type": "string", "enum": [
+    "reason": {"type": "string", "maxLength": 650}, "weakness": {"type": "string", "maxLength": 300}, "reject": {"type": "boolean"},
+    "problems": {"type": "array", "maxItems": 4, "items": {"type": "object", "properties": {
+        "at": {"type": "number"}, "issue": {"type": "string", "maxLength": 200}, "action": {"type": "string", "enum": [
             "none", "fit_frame", "move_captions", "less_music", "less_sfx", "less_overlays", "tighten", "more_context"]}},
         "required": ["at", "issue", "action"]}}}, "required": [*REVIEW_WEIGHTS, "reason", "weakness", "reject", "problems"]}
 
@@ -138,11 +142,12 @@ def propose(studio, job, index, segments, folder):
                  for ident,(a,b) in choices.items()]
         studio.event(job,f"Checking complete event packets {offset+1}–{min(offset+3,len(windows))}/{len(windows)}.")
         prompt=(f"Source language: {index['language']}. Requested edit: {job['config']['min_duration']}–{job['config']['max_duration']} seconds. "
-                f"Audience brief: {job['config'].get('brief','')}. Attention hint: {job['source'].get('attention_hint',0)}. "
+                f"Audience brief: {job['config'].get('brief','')}. Source title (context, not proof of authenticity): {job.get('source_metadata',{}).get('title','')}. Attention hint: {job['source'].get('attention_hint',0)}. "
                 "Each packet contains ONLY its own source-window evidence. For EACH packet, choose at most ONE complete entertainment beat if it has a genuine setup and outcome inside that packet. "
                 "Return its matching window_id; do not borrow another packet's outcome. complete=false or omit when an essential setup/outcome is absent. "
                 "The exact source window is already measured; do not invent timecodes. The later editor can trim the window to the chosen beat. "
                 "Visual summaries can be wrong: cross-check names, prizes and stated outcomes against the speech. Never conflate two different challenges at a transition. "
+                "For visually impressive game footage, a visual reveal can be the entertainment beat: promise a specific observable detail and retain its strongest view. Do not force every cinematic sequence into a plot summary. "
                 "Skip ads. Use an event_key describing the real physical event, not its window ID, consistently across overlapping packets. "
                 "Title <=10 words, setup/payoff <=18 words each, reason <=25 words. Score 1–5 for editorial potential.\n"
                 +json.dumps({'source_packets':packets},ensure_ascii=False,separators=(',',':')))
@@ -196,9 +201,172 @@ def propose(studio, job, index, segments, folder):
     return ordered
 
 
+PLAN_RECOVERY_VERSION = 2
+
+
+def validate_plan(raw, source_duration, minimum, maximum, bounds):
+    """Keep story cuts strict; discard unsafe optional decoration, preserving evidence.
+
+    A bad crop or a callout authored in source time must not discard an otherwise
+    valid story. Never extend, repeat, reorder or slow footage to meet duration.
+    """
+    raw = deepcopy(raw)
+    adjustments = []
+    for label, item in [('global', raw), *[(f'shot {i+1}', s) for i, s in enumerate(raw.get('spans', []))]]:
+        if 'focus' in item:
+            try:
+                rect(item['focus'])
+            except (ValueError, TypeError):
+                item.update(layout='fit', focus=[0, 0, 1, 1])
+                adjustments.append(f'{label}: invalid crop replaced with full-frame fit')
+    if raw.get('facecam'):
+        try:
+            rect(raw['facecam'])
+        except (ValueError, TypeError):
+            raw['facecam'] = None
+            adjustments.append('Invalid facecam region removed')
+    if raw.get('layout') == 'split' and not raw.get('facecam'):
+        raw['layout'] = 'fit'
+        adjustments.append('Split layout without a valid facecam replaced with full-frame fit')
+    decorations = {key: raw.pop(key, []) for key in ('overlays', 'zooms', 'sfx')}
+    raw.update(overlays=[], zooms=[], sfx=[])
+    # This must succeed before optional graphics can be considered.
+    timeline = ClipEditPlan.parse(raw, source_duration, minimum, maximum, bounds).to_dict()
+    for key, items in decorations.items():
+        for item in items:
+            item = deepcopy(item)
+            at = item.get('at')
+            if isinstance(at, (int, float)) and at > timeline['duration']:
+                matches = [s for s in timeline['spans'] if s['kind'] != 'freeze' and s['start'] <= at < s['end']]
+                # Out-of-output-range timestamps inside exactly one retained
+                # source shot have an unambiguous mapping. Replays can make
+                # this ambiguous; then leave the cue invalid and omit it.
+                if len(matches) == 1:
+                    span = matches[0]
+                    item['at'] = span['out_start'] + (at-span['start'])/span['speed']
+                    adjustments.append(f'{key}: source timestamp {at} mapped to output {item["at"]:.3f}')
+            trial = {**raw, key: [*raw[key], item]}
+            try:
+                ClipEditPlan.parse(trial, source_duration, minimum, maximum, bounds)
+            except (ValueError, TypeError, KeyError):
+                adjustments.append(f'{key}: invalid optional cue omitted; original timing retained in raw proposal')
+            else:
+                raw = trial
+    plan = ClipEditPlan.parse(raw, source_duration, minimum, maximum, bounds).to_dict()
+    if adjustments:
+        plan['validation_adjustments'] = adjustments
+    return plan
+
+
+def configured_plan(plan, config):
+    if config.get('layout') in {'fit', 'crop', 'split'}:
+        plan['layout'] = config['layout']
+        for span in plan['spans']:
+            span.pop('layout', None)
+            span.pop('focus', None)
+    if plan['layout'] == 'split' and not plan['facecam']:
+        plan['layout'] = 'fit'
+    if config.get('music') == 'none':
+        plan['music_mood'] = 'none'
+    if not config.get('sfx', True):
+        plan['sfx'] = []
+    if config.get('style', 'auto') != 'auto':
+        plan['caption_style'] = config['style']
+    return plan
+
+
+def bounded_plan_schema(maximum,measured_focus=None):
+    schema = deepcopy(PLAN_SCHEMA)
+    props = schema['properties']
+    props['spans']['maxItems'] = 6
+    props['overlays']['maxItems'] = 3
+    props['zooms']['maxItems'] = 3
+    props['sfx']['maxItems'] = 3
+    for name, limit in [('title', 100), ('hook', 140), ('post_caption', 250), ('reason', 220)]:
+        props[name]['maxLength'] = limit
+    props['editing_strategy']['properties']['reason']['maxLength'] = 220
+    presets = [[0, 0, 1, 1], [0, 0, .3, 1], [.35, 0, .3, 1], [.7, 0, .3, 1]]
+    for focus in measured_focus or []:
+        try:
+            focus=rect(focus)
+        except (ValueError,TypeError):
+            continue
+        if focus not in presets:presets.append(focus)
+    for focus in (props['focus'], props['spans']['items']['properties']['focus']):
+        focus['enum'] = presets
+    props['facecam']['items'].update(minimum=0, maximum=1)
+    for key, minimum, duration_limit in [('overlays', .4, 5), ('zooms', .3, 4)]:
+        cue = props[key]['items']['properties']
+        cue['at'].update(minimum=0, maximum=max(0, maximum-minimum))
+        cue['duration'].update(minimum=minimum, maximum=duration_limit)
+    props['overlays']['items']['properties']['text']['maxLength'] = 90
+    props['zooms']['items']['properties']['scale'].update(minimum=1, maximum=1.18)
+    props['sfx']['items']['properties']['at'].update(minimum=0, maximum=max(0, maximum-.15))
+    return schema
+
+
+def repair_duration(studio, job, raw, candidate, index, segments, bounds, feedback, error):
+    """Choose a measured interval when free-form cut arithmetic fails.
+
+    This retains real context, not padding. Independent draft critics must still
+    verify the selected interval's hook, setup and payoff before qualification.
+    """
+    low, high = job['config']['min_duration'], job['config']['max_duration']
+    windows = {key: value for key, value in candidate_windows(*bounds, segments, low, high).items()
+               if low <= value[1]-value[0] <= high}
+    if not windows:
+        raise RuntimeError('Director could not produce a safe, valid timeline: no measured interval fits the requested duration')
+    properties = {key: deepcopy(PLAN_SCHEMA['properties'][key]) for key in
+                  ('title', 'hook', 'screen_hook', 'audience_angle', 'post_caption', 'reason', 'caption_style', 'music_mood')}
+    properties.update(window_id={'type': 'string', 'enum': list(windows)}, complete={'type': 'boolean'})
+    schema = {'type': 'object', 'properties': properties, 'required': list(properties)}
+    studio.event(job, 'Correcting clip length by choosing measured source boundaries: ' + candidate['title'])
+    result = call(studio, job, COMMON,
+        f'The proposed cuts failed the requested {low}–{high}-second duration. Select ONE measured source interval from allowed_windows. '
+        'Its boundaries and length are computed by code; return its window_id without inventing times. '
+        'Choose a coherent event with essential setup, an observable development and an earned ending, checking the timestamped speech. '
+        'Avoid unrelated montages, ads and unfinished anecdotes. Prefer a natural scene or conversation over many arbitrary fragments. '
+        'Set complete=false if NO interval contains a standalone story; do not pad or repeat footage. '
+        'Write a source-grounded title, a short curiosity hook answered INSIDE this interval, and explain the retained answer in reason. '
+        'Set screen_hook.enabled=true and supply a concise opening question or statement when on-screen text makes the premise clearer. Otherwise use enabled=false and empty text. '
+        'Use clean captions for dialogue unless readable source captions already cover it; use kinetic captions for suitable energetic content. '
+        'Keep title/hook under 10 words, post_caption under 30 and reason under 45. Source observations may be wrong; cross-check against speech.\n'
+        + json.dumps({'candidate': {k: candidate.get(k) for k in ('title', 'setup', 'payoff')},
+                      'allowed_windows': {key: {'start': a, 'end': b, 'seconds': round(b-a, 3)} for key, (a, b) in windows.items()},
+                      'source_evidence': evidence(index, segments, *bounds, compact=True),
+                      'critique_to_address': feedback, 'validation_error': error}, ensure_ascii=False), schema, predict=700)
+    if hasattr(studio, 'jobs_dir'):
+        runtime.atomic_json(studio.jobs_dir/job['id']/f"duration-repair-{candidate['id']}-{time.time_ns()}.json", result)
+    if result.get('complete') is not True or result.get('window_id') not in windows:
+        raise RuntimeError('Director could not produce a safe, valid timeline: no complete event fits the requested duration')
+    start, end = windows[result['window_id']]
+    revised = {**raw, **{k: result[k] for k in ('title', 'hook', 'post_caption', 'reason', 'caption_style', 'music_mood')},
+               'screen_hook':result.get('screen_hook',{'enabled':False,'text':''}),
+               'audience_angle':result.get('audience_angle','story'),
+               'spans': [{'start': start, 'end': end, 'kind': 'normal', 'speed': 1, 'duration': end-start}],
+               'overlays': [],
+               'zooms': [], 'sfx': []}
+    plan = validate_plan(revised, index['duration'], low, high, bounds)
+    plan['planning_method'] = 'measured-window-repair'
+    plan['duration_repair'] = {'reason': error, 'window_id': result['window_id'], 'source_bounds': [start, end]}
+    return configured_plan(plan, job['config'])
+
+
 def make_plan(studio, job, candidate, index, segments, previous=None, feedback=None):
     low, high = job["config"]["min_duration"], job["config"]["max_duration"]
-    left, right = max(0, candidate["start"]-8), min(index["duration"], candidate["end"]+8)
+    padding = 0 if candidate.get('boundary_policy') == 'exact' else 8
+    left, right = max(0, candidate["start"]-padding), min(index["duration"], candidate["end"]+padding)
+    if previous is None and feedback is None and hasattr(studio, 'jobs_dir'):
+        saved = sorted((studio.jobs_dir/job['id']).glob(f"director-raw-{candidate['id']}-*.json"), reverse=True)
+        for path in saved:
+            try:
+                raw = json.loads(path.read_text())
+                raw['id'] = candidate['id']
+                plan = validate_plan(raw, index['duration'], low, high, (left, right))
+            except (ValueError, TypeError, KeyError):
+                continue
+            studio.event(job, 'Recovered saved source cuts with safe framing: ' + candidate['title'])
+            return configured_plan(plan, job['config'])
     rules = (f"Create a video-aware edit lasting {low}–{high} seconds. Use only source seconds {left:.2f}–{right:.2f}. "
              "The visual observation blocks are evidence, NOT an edit timeline. Do not copy their full intervals into spans. "
              "Select concise source sections from the timestamped speech and action, including essential setup and the real payoff. "
@@ -209,9 +377,18 @@ def make_plan(studio, job, candidate, index, segments, previous=None, feedback=N
              "Normal spans retain chronological order. A replay is <=4 seconds; a freeze is .25–1.5 seconds with start=end. "
              "Speed is .8–1.25, preferably 1 for speech. Avoid excessive cuts, constant zooming, and effects on every word. "
              "Crop only when the main action fits; keep a wide shot when necessary. Optional span layout/focus overrides global framing for that shot. Split is only for actual gameplay with a visible facecam. "
+             "Regions are [LEFT, TOP, WIDTH, HEIGHT], NOT center coordinates or timestamps. LEFT+WIDTH and TOP+HEIGHT must each be <=1. "
              "Use [0,0,1,1] as focus for full-frame action. facecam=[] if absent. "
              "All overlays, zooms and sound effects use FINISHED-VIDEO seconds, not source time. "
+             "For example source 600 seconds at the beginning of the edit is output 0 seconds. Overlay duration .4–5 seconds, zoom duration .3–4 seconds and zoom scale 1–1.18. "
              "Use a few source-grounded editorial callouts, a short hook, timed emphasis, and music matching the moment. "
+             "Decide screen_hook explicitly: enable it when a brief on-screen question or statement improves the first seconds. "
+             "Use 3–9 readable words, at most 75 characters, that create curiosity without giving away the ending. "
+             "For suitable entertainment, gameplay and visually impressive footage choose style=hype: short, bold, conversational, emotionally charged. "
+             "Use the visual co-editor's visual_brief: its opening_frame_id maps to a measured source frame, and its shot_suggestions identify visible close-ups or details. Use that visual evidence with the dialogue, not the plot summary alone. "
+             "Emphasis is one literal word or phrase from the headline. A teaser is an optional first shot <=2.5 seconds from the strongest retained visual; its audio is muted so it cannot manufacture dialogue. "
+             "It will be burned into the opening automatically. The retained ending must answer its promise. "
+             "Disable it for an already clear opening or when readable source text would compete. Do not repeat it as another overlay. "
              "A source already containing rapid edits, captions and music needs lighter intervention. "
              "Do not invent quotes or cover important existing text. Title, captions and graphics match the source language. "
              "Prefer 2–6 deliberate source spans, at most two short overlays, three zooms and three sound cues when useful; fewer effects can be appropriate. "
@@ -225,36 +402,28 @@ def make_plan(studio, job, candidate, index, segments, previous=None, feedback=N
                   'weakness':review.get('weakness','')[:500],'metrics':review.get('metrics'),
                   'problems':[{**p,'issue':p['issue'][:200]} for p in review.get('problems',[])[:6]]}
     prompt = rules + STYLE_GUIDE + DIRECTOR_GUIDE + json.dumps({"candidate": candidate, "evidence": evidence(index, segments, left, right),
+                                 "source_context":{"title":job.get('source_metadata',{}).get('title',job.get('name','')),
+                                                   "creator":job.get('source_metadata',{}).get('uploader','')},
                                  "previous_edit": previous, "requested_improvements": feedback,
                                  "source_language": index["language"], "content_preference":job['config'].get('content_mode','auto'),
-                                 "audience": job["config"].get("brief", "")}, ensure_ascii=False)
+                                 "audience": job["config"].get("brief", "") or "Entertainment-first social editing: bold, conversational hooks, striking source visuals, readable kinetic graphics and well-timed accents. Consider visual wow or humor when stronger than retelling the plot."}, ensure_ascii=False)
     last_error = None
     correction=''
     for attempt in range(2):
-        raw = call(studio, job, COMMON, prompt + correction, PLAN_SCHEMA, predict=1800)
+        measured=[shot['focus'] for shot in candidate.get('fine_evidence',{}).get('visual_brief',{}).get('shot_suggestions',[]) if shot.get('focus')]
+        raw = call(studio, job, COMMON, prompt + correction, bounded_plan_schema(high,measured), predict=1800)
         if hasattr(studio,'jobs_dir'):
             runtime.atomic_json(studio.jobs_dir/job['id']/f"director-raw-{candidate['id']}-{time.time_ns()}.json",raw)
         raw["id"] = candidate["id"]
         try:
             if not raw.get("facecam"):
                 raw["facecam"] = None
-            plan = ClipEditPlan.parse(raw, index["duration"], low, high, (left, right)).to_dict()
-            if job["config"].get("layout") in {"fit", "crop", "split"}:
-                plan["layout"] = job["config"]["layout"]
-                for span in plan["spans"]:
-                    span.pop("layout", None)
-                    span.pop("focus", None)
-            if plan["layout"] == "split" and not plan["facecam"]:
-                plan["layout"] = "fit"
-            if job["config"].get("music") == "none":
-                plan["music_mood"] = "none"
-            if not job["config"].get("sfx", True):
-                plan["sfx"] = []
-            if job['config'].get('style','auto')!='auto':
-                plan['caption_style']=job['config']['style']
-            return plan
+            plan = validate_plan(raw, index["duration"], low, high, (left, right))
+            return configured_plan(plan, job['config'])
         except (ValueError, TypeError, KeyError) as exc:
             last_error = str(exc)
+            if last_error.startswith('finished clip duration'):
+                return repair_duration(studio, job, raw, candidate, index, segments, (left, right), feedback, last_error)
             measured=sum(s.get('duration',0) if s.get('kind')=='freeze' else
                          max(0,s.get('end',0)-s.get('start',0))/max(.01,s.get('speed',1)) for s in raw.get('spans',[]))
             correction=(f'\nThe previous proposal FAILED validation: {last_error}. Its calculated total was {measured:.2f} seconds; '
@@ -268,7 +437,7 @@ def critique(studio, job, plan, sheets, transcript, technical, original_context,
     original_context={k:v for k,v in original_context.items() if k!='neighboring_speech'}
     prompt = (STYLE_GUIDE + CRITIC_GUIDE + "Critique the finished edit. Frame labels are OUTPUT timestamps. Find at least one concrete weakness when present; do not inflate ratings. "
               "Do not require extra effects when the footage is already engaging. Detect obscured action, duplicated captions, awkward pauses, abrupt missing setup, and an ending without payoff.\n"
-              + json.dumps({"duration": plan["duration"], "editing_strategy":plan.get('editing_strategy'), "spoken_content": transcript, "source_context": original_context,
+              + json.dumps({"duration": plan["duration"], "audience_angle":plan.get('audience_angle'), "editing_strategy":plan.get('editing_strategy'), "rendered_text":plan.get('overlays',[]), "spoken_content": transcript, "source_context": original_context,
                             "technical_measurements": technical, "previous_problems_to_verify": previous}, ensure_ascii=False))
     prompt+='\nKeep the reason under 70 words and the weakness under 35 words. Report up to four concrete problems; no repeated scene narration.'
     result = call(studio, job, system, prompt, REVIEW_SCHEMA, sheets, vision=True, predict=1100)
@@ -302,11 +471,13 @@ def apply_revision_actions(plan, review):
 
 def story_review(studio,job,plan,spoken,context):
     properties={k:{"type":"integer","minimum":1,"maximum":5} for k in ("hook","clarity","payoff","pacing")}
-    properties.update(reason={"type":"string"},weakness={"type":"string"},reject={"type":"boolean"})
+    properties.update(reason={"type":"string","maxLength":600},weakness={"type":"string","maxLength":240},reject={"type":"boolean"})
     schema={"type":"object","properties":properties,"required":list(properties)}
     return call(studio,job,COMMON,
                 "Independently critique the actual edited story. You did not select it. Score hook, standalone clarity, real payoff and pacing from 1 to 5. "
                 "Compare the finished spoken content against the original event context. Reject missing essential setup, misleading cuts, or absent payoff. "
                 "For visual-only events, use the source-grounded visual observations; do not require narration. State one concrete strength and weakness.\n"
+                "Be concise: reason under 60 words, weakness under 25 words. Do not retell the scene or repeat yourself. "
                 "Only source intervals explicitly retained in finished_timeline are visible in the edit. Do not credit setup or payoff removed by its cuts. "
-                +json.dumps({"finished_duration":plan["duration"],"finished_timeline":plan["spans"],"finished_speech":spoken,"original_context":context},ensure_ascii=False),schema,predict=1300)
+                "Judge the actual rendered opening text and its promised answer. Do not require the full film's context or a later escape when the clip only promises a reveal or a complete narrated anecdote. "
+                +json.dumps({"finished_duration":plan["duration"],"audience_angle":plan.get('audience_angle'),"finished_timeline":plan["spans"],"rendered_text":plan.get('overlays',[]),"finished_speech":spoken,"original_context":context},ensure_ascii=False),schema,predict=700)

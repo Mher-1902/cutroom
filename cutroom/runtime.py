@@ -139,7 +139,15 @@ def chat(model, system, prompt, schema, images=None, cancelled=lambda: False, ke
         def unregister():
             with _active_lock:
                 _active_responses.pop(key, None)
-        result, usage = vllm_backend.stream(body, cancelled, register, unregister)
+        try:
+            result, usage = vllm_backend.stream(body, cancelled, register, unregister)
+        except vllm_backend.IncompleteResponse as exc:
+            # Private diagnostics live beside this job, never in public source
+            # or the user-facing error. Never accept a truncated model answer.
+            if key and re.fullmatch(r'[a-f0-9]{32}', str(key)):
+                atomic_json(vllm_backend.DATA/'jobs'/str(key)/f'incomplete-response-{time.time_ns()}.json',
+                            {'model':model,'partial':exc.partial,'usage':exc.usage,'limit':predict})
+            raise
         elapsed = time.time() - started
         if metrics is not None:
             metrics.append({"runtime": "vllm-metal", "model": model, "seconds": round(elapsed, 2),

@@ -1,6 +1,6 @@
 # V2 acceptance status
 
-Updated 6 November 2026. This file records verification, not a promise of views or monetization.
+Updated 8 November 2026. This file records verification, not a promise of views or monetization. Later dated entries supersede earlier historical status.
 
 - Hardware inspected: Apple M5, 10 CPU cores, 10 GPU cores, 24 GiB unified memory.
 - All approved weights acquired locally, including Whisper turbo, Qwen3.5 9B, both 27B quantizations and Qwen3 14B. The audio-event classifier and Python alignment/analysis environment are installed.
@@ -58,3 +58,33 @@ The username/watermark field is now visible before Create, outside the advanced 
 The user correctly saved explicit Safari authorization on project `660054ac1e444231ad280052e4d313a8`. A metadata-only retry returned macOS `Operation not permitted` for Safari's cookie file. The user then explicitly authorized Chrome for the same import. Chrome is installed, but directory metadata access to its standard profile folder also returned `PermissionError: Operation not permitted`; the downloader had hidden that denial as a missing database. No cookie values were printed or exported.
 
 The importer now distinguishes missing consent, denied OS access, missing profile data, keychain errors and rejected YouTube sessions. Chrome's authorized directory-access preflight prevents the misleading missing-database diagnosis. The existing project was retried through a desktop-launched backend and remained blocked by macOS privacy controls. The UI now shows that cause once, with a permission/upload choice. Full Disk Access has not been granted or changed by the agent. 52 application tests and six JavaScript tests pass. No successful restricted-video import or qualified v2 output is claimed.
+
+## 7 November GTA import and planner recovery
+
+After the user granted the desktop app browser access, the explicitly authorized Chrome import succeeded. The 1,608-second source was downloaded and fully transcribed/mapped. The unrelated Qwen server was stopped by the user. Editing no longer requires browser access for this already imported source.
+
+The subsequent run incorrectly reported a quality-cutoff failure at 50%. Inspection showed all six candidates had failed edit-plan validation, with **zero rendered drafts and zero critic reviews**. Errors were invalid normalized framing rectangles and retained durations below the selected 61-second minimum. This was a planner failure, not evidence that the footage failed the editorial rubric.
+
+The corrected planner keeps source bounds, chronology and duration strict. Invalid optional framing falls back to a full-frame fit, and invalid optional graphic/audio cues are omitted with recorded adjustments. It never pads or repeats footage to reach a duration. Saved raw cuts can be recovered without another model call. Technical planning failures retry once after this planner update, while actual critic rejections remain preserved. The first draft is prioritized before batch planning. Failure messages distinguish planning from review, and failed projects display Stopped instead of a frozen percentage.
+
+The existing project resumed from saved analysis. Its first recovered edit rendered at **86.70 seconds, 720×1280**, with **−14.31 LUFS** and **−0.84 dBTP**; technical checks passed. Play/Pause and the 1:26 duration were verified in the native desktop app. The independent critics scored it **55/100** for missing story context and pacing/continuity issues; revision is running. This is a real rendered draft, **not a qualified final export or completed automatic production run**.
+
+57 application tests and seven JavaScript tests pass, including strict duration/source-bound preservation, saved-plan recovery, single retry of technical failures, preservation of critic rejections, and stopped-state messaging. Main promotion remains pending qualified real-video output checks.
+
+## 8 November: reviewer recovery and real hook output
+
+Private diagnostics reproduced the incomplete-review failure: after writing its reason/weakness the model emitted repeated whitespace until its 700-token cap, without completing the required rejection field. Request-level whitespace flags did not correct this installed backend. Enabling compact JSON at the **server's xgrammar configuration** did: the exact previously failing story review completed in **45.47 seconds including 13.52 seconds model startup**, returning **76 output tokens** from a 5,568-token prompt. Truncated answers remain rejected. Review operations retry once, successful visual/story components checkpoint independently, and an unfinished review does not discard other candidate drafts. Revisions with identical rendered content are no longer rendered/reviewed repeatedly.
+
+The independent 60–90-second button was verified in the native desktop window: it sets the length selector and summary to 60–90 seconds. The editor now explicitly chooses optional on-screen hook text; enabled hooks are burned into the opening and off decisions remain off. A local 14B director chose **“What happens when you can't let go?”** for an operator-annotated source interval. The resulting **65.53-second, 1080×1920** edit passed technical checks and both critics at **81/100**, −15.03 LUFS and −0.93 dBTP. Its MP4/SRT/ASS/cover endpoints returned usable range responses; the 12-entry ZIP passed integrity checks. It is available as a separate completed preview project. This verifies model direction/render/review for an annotated interval, **not automatic full-source candidate selection**.
+
+Following user feedback, a more energetic **68.07-second** operator-directed style preview added a muted portrait cold open, short freeze, large animated “WAIT… THIS IS GTA?!” headline, timed visual-detail callouts, punch-ins, licensed music/SFX and a final viewer question. Technical checks passed at **1080×1920**, −14.98 LUFS and −0.91 dBTP. The user accepted this general direction. The preview is not represented as an automatically selected or critic-qualified production run.
+
+## Visual co-editor and fresh hype run
+
+Selected events now send the vision model an **eight-frame timestamped storyboard**, **two motion strips** and, when installed, a separate private approved style image. It returns source-frame IDs, an opening recommendation, a hook angle and shot suggestions. Source times are resolved from measured frame IDs; native face regions support the framing recommendations. The text-only 14B director receives this visual brief, the actual source title, speech and audience brief. It is not described as directly processing images itself. Style-reference content is explicitly separated from source evidence, and private source/reference frames remain outside public Git.
+
+Real GTA visual-brief test: **44.24 seconds total**, four images, 3,930 prompt tokens and 268 output tokens. A separate MrBeast-source check with the same GTA style reference completed in **54.32 seconds** and produced a host/prize/challenge hook without copying GTA wording. These probes verify image input and source-specific recommendations, not that every visual interpretation is correct. Later native-region checks constrain unsupported portrait recommendations.
+
+The previous GTA run was cancelled with its renders and checkpoints retained after the user requested a different direction. A fresh **three-clip, 60–90-second** run uses the hype brief. Source fingerprint/language validation allowed reuse of all **1,608 source frames**, audio, transcription and full-video analysis, while selecting new candidates and plans. The editing journal confirms reuse and fresh selection. This is a warm run and cannot establish cold-start completion timing. Full automatic production acceptance remains pending.
+
+69 application tests and eight JavaScript tests pass. Main remains unchanged pending the required automatic production and export acceptance checks.

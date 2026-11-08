@@ -1,6 +1,6 @@
 # Cutroom v2
 
-A personal Mac studio for turning a YouTube link or uploaded video into up to ten reviewed vertical shorts. New clips default to **61–120 seconds**. A separate prominent length selector offers **15–29 seconds**, **30–59 seconds**, and a custom range within **15–180 seconds**. Exports must match the selected range; only a selection above one minute enforces >60 seconds. A shorter or weaker source can produce fewer qualifying clips. The Bordeaux/cream interface uses locally bundled Fraunces and Instrument Sans.
+A personal Mac studio for turning a YouTube link or uploaded video into up to ten reviewed vertical shorts. New clips default to **61–120 seconds**. A separate prominent length selector offers **15–29 seconds**, **30–59 seconds**, **60–90 seconds** (also available as a one-click button), and a custom range within **15–180 seconds**. Exports must match the selected range; only a selection above one minute enforces >60 seconds. A shorter or weaker source can produce fewer qualifying clips. The Bordeaux/cream interface uses locally bundled Fraunces and Instrument Sans.
 
 ## Run
 
@@ -40,9 +40,10 @@ The runtime benchmark chooses from explicit source-window IDs, avoiding invented
 
 1. Import the original-language audio and video, transcribe speech, and map the complete timeline. Map the whole source in 60-second broad windows, combining uniform visual samples with scene/sound cues and full speech. Selected candidates receive denser inspection around setup, reveals and reactions. Brief events between samples can still be missed.
 2. Combine visual observations, speech, scene changes, faces/text and sound cues. Find up to forty distinct candidate events across the full video, with enough context for a complete challenge, reaction or gameplay beat. Exclude sponsor material and repeated outcomes.
-3. Direct a validated edit: chronological source sections, optional replay/freeze beats, framing, timed punch-ins, captions, hook/callouts, music mood and SFX. Maintain source-to-output mapping through cuts, speed changes and replays.
-4. Render a draft. Inspect image sequences, actual mapped speech and audio/technical measurements with the vision critic and a separate story-critic request. Revise specific weaknesses, allowing two automatic revision rounds.
-5. Export only clips scoring at least 70/100 and passing technical checks. Backfill from the remaining candidate pool until ten qualify or the pool is exhausted. Scores describe editorial potential, not probabilities of virality or predicted views.
+3. The visual co-editor receives an eight-frame source storyboard, two motion strips and an optional private approved style reference. It recommends a measured opening frame, framing and visible details; the 14B text director uses those observations with source dialogue and title context. Reference imagery supplies style, never source facts.
+4. Direct a validated edit: chronological source sections, optional replay/freeze beats, framing, timed punch-ins, captions, optional large animated on-screen hooks, detail callouts, music mood and SFX. A muted cold open can introduce a strong source visual without inventing spoken dialogue. Maintain source-to-output mapping through cuts, speed changes and replays.
+5. Render a draft. Inspect image sequences, actual mapped speech and audio/technical measurements with the vision critic and a separate story-critic request. Revise specific weaknesses, allowing two automatic revision rounds.
+6. Export only clips scoring at least 70/100 and passing technical checks. Backfill from the remaining candidate pool until ten qualify or the pool is exhausted. Scores describe editorial potential, not probabilities of virality or predicted views.
 
 The director and story critic are separate requests using the selected director weights; they are not statistically independent judges. Visual critique uses the separate 9B model. Models can misread footage, captions and context. Human viewing remains necessary before publishing.
 
@@ -85,3 +86,5 @@ node --check static/app.js
 ```
 
 Do not delete or move project/model folders while a run is active. Media, uncompressed WAVs, frame sequences, draft versions and archives can occupy substantial disk space. No data is automatically deleted. The local HTTP server checks request host, origin and a per-session mutation token; media paths are allowlisted. This is a single-user local application.
+
+Approved style references stay in `data/style-references/` and are excluded from public Git. New entertainment edits use an energetic social-media brief with content-specific visual, reaction, humor or story angles. Source analysis can be reused for a new brief when source path, size, modification time and language match; candidate choices and edit plans are regenerated. Interrupted AI reviews retry once, preserve their rendered drafts and never qualify an incomplete answer.
