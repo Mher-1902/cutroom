@@ -1,10 +1,11 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "fixture_only": true,
+  "plan_contract": "resolved caption_style and event-specific editing_strategy; auto input style",
   "training_ready": false,
   "reason": "Exact tokenizer length check and GPU memory gate still required",
   "sources_digest": "29fe5110a826821888446258c451954133eea9a1dba92e605d8393412d92ba33",
-  "examples_digest": "4ea8db4dc35c2c510d970a78eab5ebaade5132e1a280fcd37e2b7418b04be53d",
+  "examples_digest": "861555f6b3407311c3c08db6dd19c75d2310f7a7c31eaf5fbedf854d7023daff",
   "counts": {
     "train": 1,
     "valid": 1,
@@ -16,5 +17,5 @@
     "rank": 1
   },
   "source_groups": 3,
-  "contracts_digest": "8d86288b7724e71e162e3154b45963bf3bdc0d670d543d89106ddb003920d03a"
+  "contracts_digest": "cbd5168f1adaba9d24957b6c3ea90d769cfa686d4bf038f5b97ec8bbc1eafd80"
 }

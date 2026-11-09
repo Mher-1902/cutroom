@@ -4,6 +4,7 @@ import hashlib
 import math
 from pathlib import Path
 import re
+import time
 
 from . import core, local_models, runtime
 from .contracts import remap_words
@@ -56,10 +57,37 @@ def source_caption_intervals(index, plan):
     return intervals
 
 
+def overlay_lines(text, size, width=860):
+    """Wrap using the bundled rendered font, not a character-count guess."""
+    try:
+        from PIL import ImageFont
+        font=ImageFont.truetype(str(Path(__file__).resolve().parents[1]/'static/fonts/anton/Anton-Regular.ttf'),size)
+        measure=font.getlength
+    except (ImportError,OSError):
+        measure=lambda value:len(value)*size*.55
+    lines=[];line=''
+    for word in text.split():
+        trial=(line+' '+word).strip()
+        if line and measure(trial)>width:
+            lines.append(line);line=word
+        else:line=trial
+    if line:lines.append(line)
+    return lines
+
+
 def make_ass(plan, segments, index, style="kinetic",watermark=None):
+    if style=='auto':
+        style=plan.get('caption_style','kinetic')
     mapped = remap_words(segments, plan)
     suppressed = source_caption_intervals(index, plan)
-    margin = 970 if plan.get("caption_position") == "upper" else 410
+    if plan.get('caption_settings') or (watermark or {}).get('caption_settings'):
+        from . import caption_styles
+        mapped=caption_styles.corrections(mapped,plan.get('caption_edits',{}))
+        visible=plan.get('caption_enabled',style!='none')
+        return caption_styles.make_ass(plan,mapped,suppressed,watermark or {},'auto' if visible else 'none'),mapped,len(suppressed)
+    # Keep captions out of the source action and the upper story graphics.
+    upper=plan.get('caption_position')=='upper' and plan.get('layout')!='fit'
+    margin = 1320 if upper else 410
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -68,7 +96,7 @@ WrapStyle: 0
 ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Captions,Barlow Condensed,84,&H00FFFFFF,&H00FFFFFF,&H00120A0D,&H70120914,-1,0,0,0,100,100,0,0,1,5,2,2,100,100,{margin},1
+Style: Captions,Barlow Condensed,84,&H00FFFFFF,&H00FFFFFF,&H20120A0D,&H70120914,-1,0,0,0,100,100,0,0,3,10,0,2,100,100,{margin},1
 Style: Hook,Anton,76,&H00D6F1FF,&H00D6F1FF,&H00190B13,&H70190B13,0,0,0,0,100,100,1,0,3,12,0,8,100,100,240,1
 Style: Callout,Anton,69,&H00A68BF0,&H00A68BF0,&H00190B13,&H70190B13,0,0,0,0,100,100,1,0,1,4,2,8,100,100,330,1
 [Events]
@@ -80,9 +108,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             start, end = max(0, group[0]["start"]), min(plan["duration"], group[-1]["end"])
             if end <= start or any(max(start, a) < min(end, b) for a,b in suppressed):
                 continue
+            occupied=any(max(start,o['at'])<min(end,o['at']+o['duration']) for o in plan['overlays'])
+            lane='{\\an2\\pos(540,1510)}' if upper and occupied else ''
             if style == "clean" or len(group) == 1:
                 text = " ".join(core.ass_escape(w["text"]) for w in group)
-                events.append(f"Dialogue: 0,{core.ass_time(start)},{core.ass_time(end)},Captions,,0,0,0,,{{\\fad(55,55)}}{text}")
+                events.append(f"Dialogue: 0,{core.ass_time(start)},{core.ass_time(end)},Captions,,0,0,0,,{lane}{{\\fad(55,55)}}{text}")
             else:
                 for i, word in enumerate(group):
                     a = max(start, word["start"])
@@ -91,22 +121,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         continue
                     text = " ".join(("{\\c&HA68BF0&}" if j == i else "{\\c&HFFFFFF&}") + core.ass_escape(w["text"]) for j,w in enumerate(group))
                     animate = "{\\fscx96\\fscy96\\t(0,85,\\fscx100\\fscy100)}" if i == 0 else ""
-                    events.append(f"Dialogue: 0,{core.ass_time(a)},{core.ass_time(b)},Captions,,0,0,0,,{animate}{text}")
+                    events.append(f"Dialogue: 0,{core.ass_time(a)},{core.ass_time(b)},Captions,,0,0,0,,{lane}{animate}{text}")
     for overlay in plan["overlays"]:
-        words = core.ass_escape(overlay["text"]).split()
-        lines, line = [], ""
-        for word in words:
-            if len(line) + len(word) > 25 and line:
-                lines.append(line)
-                line = word
-            else:
-                line += (" " if line else "") + word
-        if line:
-            lines.append(line)
-        text = "\\N".join(lines[:3])
+        hype=plan.get('screen_hook',{}).get('style')=='hype' and overlay['kind']!='label'
+        size=(122 if overlay['kind']=='hook' else 94) if hype else (76 if overlay['kind']=='hook' else 69)
+        visible=overlay['text'].upper() if hype else overlay['text']
+        lines=overlay_lines(visible,size)
+        while len(lines)>3 and size>72:
+            size-=10;lines=overlay_lines(visible,size)
+        emphasis=plan.get('screen_hook',{}).get('emphasis','').upper().strip('.,!?…')
+        painted=[]
+        for line in lines:
+            words=[]
+            for word in line.split():
+                escaped=core.ass_escape(word)
+                if hype and emphasis and word.strip('.,!?…').upper()==emphasis:
+                    escaped='{\\c&HA68BF0&}'+escaped+'{\\c&HFFFFFF&}'
+                words.append(escaped)
+            painted.append(' '.join(words))
+        text = "\\N".join(painted)
         name = "Hook" if overlay["kind"] == "hook" else "Callout"
         a, b = overlay["at"], min(plan["duration"], overlay["at"]+overlay["duration"])
-        animation = "{\\fad(90,130)\\fscx88\\fscy88\\t(0,160,\\fscx100\\fscy100)}"
+        animation = (f"{{\\fs{size}\\bord6\\shad3\\fad(40,100)\\fscx82\\fscy82\\t(0,100,\\fscx108\\fscy108)\\t(100,190,\\fscx100\\fscy100)}}" if hype else
+                     f"{{\\fs{size}\\fad(90,130)\\fscx88\\fscy88\\t(0,160,\\fscx100\\fscy100)}}")
         events.append(f"Dialogue: 1,{core.ass_time(a)},{core.ass_time(b)},{name},,0,0,0,,{animation}{text}")
     for span in plan["spans"]:
         if span["kind"] == "replay":
@@ -115,11 +152,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         position=watermark.get("watermark_position","top-right")
         left=position.endswith("left")
         top=position.startswith("top")
-        alpha=round(255*(1-watermark.get("watermark_opacity",.25)))
+        alpha=round(255*(1-watermark.get("watermark_opacity",.20)))
         x,y=(65 if left else 1015),(115 if top else 1720)
         anchor=(7 if left else 9) if top else (1 if left else 3)
         text=core.ass_escape(watermark["watermark_text"])
-        tag=f"{{\\an{anchor}\\pos({x},{y})\\fs38\\fnBarlow Condensed\\bord1\\shad0\\alpha&H{alpha:02X}&\\c&HFFFFFF&}}"
+        tag=f"{{\\an{anchor}\\pos({x},{y})\\fs28\\fnBarlow Condensed\\bord0.6\\shad1\\blur0.3\\alpha&H{alpha:02X}&\\c&HFFFFFF&}}"
         events.append(f"Dialogue: 3,0:00:00.00,{core.ass_time(plan['duration'])},Captions,,0,0,0,,{tag}{text}")
     return header + "\n".join(events) + "\n", mapped, len(suppressed)
 
@@ -160,8 +197,8 @@ def crop_keyframes(index, span, focus, metadata):
 
 
 def layout_filter(label, out, plan, width, height, index, span, metadata):
-    layout = plan["layout"]
-    focus = plan["focus"]
+    layout = span.get("layout", plan["layout"])
+    focus = span.get("focus", plan["focus"])
     portrait_fraction = min(1, (width/height)/(metadata["width"]/metadata["height"]))
     if layout == "crop" and focus[2] > portrait_fraction * 1.4:
         layout = "fit"
@@ -190,10 +227,20 @@ def layout_filter(label, out, plan, width, height, index, span, metadata):
                         f"[{stem}game]crop=iw:ih*{game_h:.5f}:0:ih*{game_y:.5f},scale={width}:{height-top}:force_original_aspect_ratio=decrease,pad={width}:{height-top}:(ow-iw)/2:(oh-ih)/2:color=0x190b13,setsar=1[{stem}bottom];"
                         f"[{stem}top][{stem}bottom]vstack=inputs=2{out}")
     stem = out.strip("[]")
+    backdrop="brightness=-.24:saturation=.65" if plan.get('caption_settings') else "brightness=-.12"
     return (f"{label}split=2[{stem}bg][{stem}fg];"
-            f"[{stem}bg]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},boxblur=24:2,eq=brightness=-.12[{stem}back];"
+            f"[{stem}bg]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},boxblur=24:2,eq={backdrop}[{stem}back];"
             f"[{stem}fg]scale={width}:{height}:force_original_aspect_ratio=decrease[{stem}front];"
             f"[{stem}back][{stem}front]overlay=(W-w)/2:(H-h)/2,setsar=1{out}")
+
+
+def encoder_options(encoder,final,width,threads=6):
+    if encoder=='h264_videotoolbox':
+        bitrate='16M' if width>=1080 else '8M'
+        return ['-c:v','h264_videotoolbox','-allow_sw','0','-profile:v','high','-b:v',bitrate,
+                '-realtime','0','-prio_speed','0','-pix_fmt','yuv420p']
+    return ['-c:v','libx264','-threads',str(threads),'-preset','slow' if final else 'veryfast',
+            '-crf','18' if final else '25','-pix_fmt','yuv420p']
 
 
 def render(studio, job, source, plan, segments, index, metadata, folder, revision=0, final=False):
@@ -205,19 +252,28 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
     ass_path.write_text(ass)
     srt_path.write_text(srt(mapped))
     marker = folder / (stem + ".complete.json")
-    fingerprint = hashlib.sha256(json.dumps({"plan":plan,"config":job["config"],"ass":ass,
+    encoder=job['config'].get('video_encoder','libx264')
+    if encoder=='auto':
+        profile=studio.data/'render-profile.json'
+        settings=json.loads(profile.read_text()) if profile.exists() else {}
+        encoder='h264_videotoolbox' if final and settings.get('verified') and settings.get('encoder')=='h264_videotoolbox' else 'libx264'
+    fingerprint = hashlib.sha256(json.dumps({"renderer_version":4,"encoder":encoder,"plan":plan,"config":job["config"],"ass":ass,
         "source":[str(source),source.stat().st_size,source.stat().st_mtime_ns]},sort_keys=True).encode()).hexdigest()
     completed=json.loads(marker.read_text()) if marker.exists() else {}
     if target.exists() and completed.get("fingerprint") == fingerprint and completed.get("bytes")==target.stat().st_size:
-        return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "preserved_caption_intervals": preserved}
+        return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "preserved_caption_intervals": preserved,
+                'render_seconds':0,'cache_hit':True,'encoder':completed.get('encoder')}
+    started=time.monotonic()
     marker.unlink(missing_ok=True)
-    (folder/(stem+".review.json")).unlink(missing_ok=True)
+    for suffix in ('.review.json', '.visual-review.json', '.story-review.json'):
+        (folder/(stem+suffix)).unlink(missing_ok=True)
     temporary = folder / (stem + ".partial.mp4")
     width = job["config"].get("resolution", 1080) if final else 720
     height = round(width*16/9/2)*2
     left = min(s["start"] for s in plan["spans"])
     right = max(s["end"] if s["kind"] != "freeze" else s["start"]+.1 for s in plan["spans"])
-    command = [local_models.binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-filter_complex_threads", "4", "-y", "-ss", str(left), "-t", str(right-left+.25), "-i", str(source),
+    cool=job.get('processing_strategy',{}).get('mode')=='long_stream'
+    command = [local_models.binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-filter_complex_threads", "2" if cool else "4", "-y", "-ss", str(left), "-t", str(right-left+.25), "-i", str(source),
                "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
     filters, inputs = [], []
     for i, span in enumerate(plan["spans"]):
@@ -228,8 +284,11 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
             filters.append(f"[1:a]atrim=duration={span['duration']:.5f},asetpts=PTS-STARTPTS[a{i}]")
         else:
             filters.append(f"[0:v]trim=start={a:.5f}:end={b:.5f},setpts=(PTS-STARTPTS)/{span['speed']:.5f},fps=30{raw}")
-            audio = "[0:a]" if metadata["has_audio"] else "[1:a]"
-            filters.append(f"{audio}atrim=start={a:.5f}:end={b:.5f},asetpts=PTS-STARTPTS,atempo={span['speed']:.5f},aformat=sample_rates=48000:channel_layouts=stereo[a{i}]")
+            if span.get('mute'):
+                filters.append(f"[1:a]atrim=duration={span['duration']:.5f},asetpts=PTS-STARTPTS[a{i}]")
+            else:
+                audio = "[0:a]" if metadata["has_audio"] else "[1:a]"
+                filters.append(f"{audio}atrim=start={a:.5f}:end={b:.5f},asetpts=PTS-STARTPTS,atempo={span['speed']:.5f},aformat=sample_rates=48000:channel_layouts=stereo[a{i}]")
         filters.append(layout_filter(raw, f"[v{i}]", plan, width, height, index, span, metadata))
         inputs.append(f"[v{i}][a{i}]")
     filters.append("".join(inputs) + f"concat=n={len(inputs)}:v=1:a=1[cutv][cuta]")
@@ -277,21 +336,33 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
         filters.append("[key]anullsink")
         mix = ["[voice]", *effects]
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:duration=first:normalize=0,alimiter=limit=.89[outa]")
-    command += ["-filter_complex", ";".join(filters), "-map", "[outv]", "-map", "[outa]", "-t", str(plan["duration"]),
-                "-c:v", "libx264", "-threads", "6", "-preset", "slow" if final else "veryfast", "-crf", "18" if final else "25", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(temporary)]
+    command += ["-filter_complex", ";".join(filters), "-map", "[outv]", "-map", "[outa]", "-t", str(plan["duration"])]
+    video_start=len(command)
+    command+=encoder_options(encoder,final,width,2 if cool else 6)
+    video_end=len(command)
+    command += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(temporary)]
     try:
-        run(command)
+        try:
+            run(command)
+        except RuntimeError as exc:
+            from .resources import ResourcePause
+            if isinstance(exc,ResourcePause):raise
+            if encoder!='h264_videotoolbox':raise
+            studio.event(job,'Hardware encoding could not finish; retrying this render with the CPU encoder.')
+            command=command[:video_start]+encoder_options('libx264',final,width,2 if cool else 6)+command[video_end:]
+            encoder='libx264';run(command)
         probe=json.loads(run([local_models.binary("ffprobe"),"-v","error","-show_format","-of","json",str(temporary)]))
         if abs(float(probe["format"]["duration"])-plan["duration"])>.25:
             raise RuntimeError("Incomplete rendered duration; this draft will be retried on resume.")
         temporary.replace(target)
-        runtime.atomic_json(marker,{"fingerprint":fingerprint,"bytes":target.stat().st_size})
+        runtime.atomic_json(marker,{"fingerprint":fingerprint,"bytes":target.stat().st_size,'encoder':encoder,
+                                   'render_seconds':round(time.monotonic()-started,2)})
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
     runtime.atomic_json(folder / (stem + ".assets.json"), {"assets": used, "caption_intervals_preserved": preserved})
-    return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "assets": used, "preserved_caption_intervals": preserved}
+    return {"path": target, "ass": ass_path, "srt": srt_path, "mapped": mapped, "assets": used, "preserved_caption_intervals": preserved,
+            'render_seconds':round(time.monotonic()-started,2),'cache_hit':False,'encoder':encoder}
 
 
 def technical_qc(studio, job, video, expected_duration, resolution):
@@ -307,8 +378,12 @@ def technical_qc(studio, job, video, expected_duration, resolution):
     peak = float(audio.get("input_tp", "inf"))
     loudness = float(audio.get("input_i", "-inf"))
     failures = []
-    if duration <= 60:
-        failures.append("Every exported short must be longer than 60 seconds")
+    minimum=job['config'].get('min_duration',61)
+    maximum=job['config'].get('max_duration',120)
+    if duration<minimum-.05 or duration>maximum+.05:
+        failures.append('Rendered duration is outside the chosen length range')
+    if minimum>60 and duration<=60:
+        failures.append('The chosen over-one-minute preset needs a video longer than 60 seconds')
     if abs(duration-expected_duration) > .25:
         failures.append("Rendered duration does not match the edit plan")
     expected_height = round(resolution*16/9/2)*2

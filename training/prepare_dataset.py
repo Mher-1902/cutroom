@@ -29,7 +29,8 @@ def main():
     prompts = [{"example_id": e["id"], "messages": messages(e, by_id[e["source_id"]])[:-1]}
                for e in examples if e["split"] == "test"]
     write_jsonl(args.out / "eval_prompts.jsonl", prompts)
-    manifest = {"format_version": 1, "fixture_only": args.fixtures,
+    manifest = {"format_version": 2, "fixture_only": args.fixtures,
+                "plan_contract": "resolved caption_style and event-specific editing_strategy; auto input style",
                 "training_ready": False, "reason": "Exact tokenizer length check and GPU memory gate still required",
                 "sources_digest": digest(sources), "examples_digest": digest(examples),
                 "counts": dict(Counter(e["split"] for e in examples)),

@@ -28,6 +28,12 @@
         "task": "plan",
         "valid": true,
         "planned_duration": 80.0,
+        "caption_style": "none",
+        "editing_strategy": {
+          "content_type": "challenge",
+          "pacing": "balanced",
+          "reason": "Synthetic format fixture: retain setup, the toy bridge test and its outcome; no actual video or human preference is represented."
+        },
         "render_verified": false
       },
       {

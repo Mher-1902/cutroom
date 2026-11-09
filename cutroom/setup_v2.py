@@ -20,10 +20,9 @@ def run_setup(root, log):
                     log(line.strip()[-500:])
             if process.wait():
                 raise RuntimeError('Setup stopped at '+Path(args[0]).name+'. Retry to resume downloaded files.')
-    missing = [name for name in ('ffmpeg','ffprobe','whisper-cli','yt-dlp','ollama') if not local_models.binary(name)]
+    missing = [name for name in ('ffmpeg','ffprobe','whisper-cli','yt-dlp') if not local_models.binary(name)]
     if missing:
         raise RuntimeError('Run Install.command first. Missing: '+', '.join(missing))
-    local_models.start_server(data)
     python = data/'venv/bin/python'
     marker = data/'environment-v2.json'
     if not marker.exists():
@@ -46,13 +45,11 @@ def run_setup(root, log):
         log('Compiling the macOS Vision face and text helper.')
         binary.parent.mkdir(exist_ok=True)
         run(['/usr/bin/swiftc',str(swift),'-O','-module-cache-path',str(data/'cache/swift'),'-o',str(binary)])
-    needed={runtime.DIRECTORS[0],runtime.VISION_MODEL}-set(local_models.model_names())
-    if needed or not (data/'models/ggml-large-v3-turbo.bin').exists():
-        log('Downloading the quality models. This does not load them into memory.')
-        run([str(python),'-m','cutroom.downloads'])
-        status=json.loads((data/'bootstrap-v2.json').read_text())
-        if status.get('errors'):
-            raise RuntimeError('; '.join(status['errors']))
+    if not (data/'models/ggml-large-v3-turbo.bin').exists():
+        log('Downloading the fast Whisper speech model without loading it.')
+        run([str(python),'-c','from cutroom.downloads import whisper; whisper()'])
+    from .setup_native import install
+    install(root, log)
     log('Preparing the local audio-event classifier.')
     run([str(python),'-m','cutroom.analysis_worker','prepare-audio','--cache',str(data/'models/huggingface')])
     runtime.atomic_json(data/'audio-model-ready.json',{'model':'MIT/ast-finetuned-audioset-10-10-0.4593'})

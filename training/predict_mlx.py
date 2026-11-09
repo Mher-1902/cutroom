@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 from common import parse_json, read_jsonl, require
 
@@ -22,8 +23,14 @@ def main():
     require(args.gpu_released, "GPU use requires explicit --gpu-released after the main app frees it")
     require(not args.out.exists(), "Refusing to overwrite predictions")
     manifest = parse_json((args.data / "manifest.json").read_text())
+    require(manifest.get("format_version") == 2,
+            "Rebuild prepared data for caption_style/editing_strategy and rerun token checks")
     require(manifest.get("fixture_only") is False, "Never run models on the synthetic format fixtures")
     require(args.base.is_dir() and (args.base / "config.json").is_file(), "Existing local model required")
+    config = parse_json((args.base / "config.json").read_text())
+    require(config.get("model_type") == "qwen3" and config.get("num_hidden_layers") == 40
+            and config.get("hidden_size") == 5120,
+            "This runner targets the Qwen3 14B plan pilot; Qwen3.5 9B adapter compatibility is not verified")
     require(importlib.metadata.version("mlx-lm") == "0.32.2", "Use the inspected release or recheck APIs")
     if args.adapter:
         require((args.adapter / "adapter_config.json").is_file()
@@ -46,9 +53,13 @@ def main():
             prompt = tokenizer.apply_chat_template(row["messages"], tokenize=False,
                                                    add_generation_prompt=True, enable_thinking=False)
             require(len(tokenizer.encode(prompt)) + args.max_tokens <= 8192, "Held-out prompt exceeds pilot inference budget")
+            started = time.perf_counter()
             output = generate(model, tokenizer, prompt=prompt, sampler=sampler,
                               max_tokens=args.max_tokens, verbose=False)
-            handle.write(json.dumps({"example_id": row["example_id"], "output": output}, ensure_ascii=False) + "\n")
+            handle.write(json.dumps({"example_id": row["example_id"], "output": output,
+                "inference": {"runtime": "mlx-lm-offline-evaluation", "runtime_version": "0.32.2",
+                              "wall_seconds": time.perf_counter() - started, "seed": 37 + n,
+                              "vllm_deployment_verified": False}}, ensure_ascii=False) + "\n")
             handle.flush()
             print(f"Saved held-out output {n+1}/{len(prompts)}", flush=True)
 

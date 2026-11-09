@@ -3,7 +3,8 @@ from copy import deepcopy
 from pathlib import Path
 import unittest
 
-from common import ROOT, read_jsonl, validate_bundle, validate_output, validate_source
+from common import (PLAN_KEYS, ROOT, app_contracts, messages, output_schema, parse_json,
+                    read_jsonl, runtime_model_specs, validate_bundle, validate_output, validate_source)
 from evaluate import coverage, iou, score_run
 
 
@@ -80,6 +81,93 @@ class ValidationTests(unittest.TestCase):
     def test_full_source_coverage_does_not_double_count_overlap(self):
         self.assertEqual(coverage([(0, 100), (50, 150)], 200), .75)
         self.assertEqual(iou({"start": 0, "end": 100}, {"start": 50, "end": 150}), 1/3)
+
+    def test_training_plan_keys_match_current_director_schema(self):
+        self.assertEqual(PLAN_KEYS, set(output_schema("plan")["required"]))
+
+    def test_caption_style_is_required_even_when_parser_has_default(self):
+        example = self.examples[0]
+        del example["target"]["caption_style"]
+        with self.assertRaisesRegex(ValueError, "missing or extra"):
+            validate_output(example, self.sources[0], example["target"])
+
+    def test_editing_strategy_is_required_even_when_parser_allows_omission(self):
+        example = self.examples[0]
+        del example["target"]["editing_strategy"]
+        with self.assertRaisesRegex(ValueError, "missing or extra"):
+            validate_output(example, self.sources[0], example["target"])
+
+    def test_auto_is_input_policy_not_resolved_caption_style(self):
+        example = self.examples[0]
+        example["target"]["caption_style"] = "auto"
+        with self.assertRaisesRegex(ValueError, "Invalid caption_style"):
+            validate_output(example, self.sources[0], example["target"])
+
+    def test_invalid_or_incomplete_strategy_is_rejected(self):
+        for strategy in ({}, [], {"content_type": "challenge", "pacing": "balanced"},
+                         {"content_type": "ad", "pacing": "balanced", "reason": "Fixture"},
+                         {"content_type": "challenge", "pacing": "turbo", "reason": "Fixture"},
+                         {"content_type": "challenge", "pacing": "balanced", "reason": ""}):
+            with self.subTest(strategy=strategy):
+                example = deepcopy(self.examples[0])
+                example["target"]["editing_strategy"] = strategy
+                with self.assertRaisesRegex(ValueError, "editing_strategy"):
+                    validate_output(example, self.sources[0], example["target"])
+
+    def test_supported_style_and_strategy_choices_survive_app_parser(self):
+        schema = output_schema("plan")["properties"]
+        for style in schema["caption_style"]["enum"]:
+            for content in schema["editing_strategy"]["properties"]["content_type"]["enum"]:
+                for pacing in schema["editing_strategy"]["properties"]["pacing"]["enum"]:
+                    with self.subTest(style=style, content=content, pacing=pacing):
+                        example = deepcopy(self.examples[0])
+                        target = example["target"]
+                        target["caption_style"] = style
+                        target["editing_strategy"] = {"content_type": content, "pacing": pacing,
+                                                      "reason": "Synthetic schema round-trip only"}
+                        result = validate_output(example, self.sources[0], target)
+                        self.assertEqual(result["caption_style"], style)
+                        self.assertEqual(result["editing_strategy"], target["editing_strategy"])
+
+    def test_prompt_defaults_to_auto_and_contains_current_strategy_schema(self):
+        example = self.examples[0]
+        example["input"].pop("style", None)
+        packet = parse_json(messages(example, self.sources[0])[1]["content"])
+        self.assertEqual(packet["style_request"], "auto")
+        self.assertIn("editing_strategy", packet["output_schema"]["required"])
+
+    def test_explicit_caption_request_is_honored(self):
+        example = self.examples[0]
+        example["input"]["style"] = "clean"
+        example["target"]["caption_style"] = "none"
+        with self.assertRaisesRegex(ValueError, "honor the explicit"):
+            validate_output(example, self.sources[0], example["target"])
+        example["target"]["caption_style"] = "clean"
+        validate_output(example, self.sources[0], example["target"])
+
+    def test_optional_shot_layout_and_focus_are_preserved(self):
+        example = self.examples[0]
+        example["target"]["spans"][0].update(layout="crop", focus=[.2, .1, .5, .8])
+        validate_output(example, self.sources[0], example["target"])
+        parsed = app_contracts().ClipEditPlan.parse(example["target"], 240).to_dict()
+        self.assertEqual(parsed["spans"][0]["layout"], "crop")
+        self.assertEqual(parsed["spans"][0]["focus"], [.2, .1, .5, .8])
+
+    def test_unknown_shot_fields_and_unsupported_layout_are_rejected(self):
+        for extra in ({"new_scene": "invented"}, {"layout": "split"}, {"focus": [0, 0, 2, 1]}):
+            with self.subTest(extra=extra):
+                example = deepcopy(self.examples[0])
+                example["target"]["spans"][0].update(extra)
+                with self.assertRaises(ValueError):
+                    validate_output(example, self.sources[0], example["target"])
+
+    def test_runtime_snapshot_metadata_is_read_without_backend_import(self):
+        import sys
+        specs = runtime_model_specs()
+        self.assertEqual(specs["mlx-community/Qwen3-14B-4bit"]["revision"],
+                         "a4d9b2df59d2c150bef02fcbe0d91046b7ca33a4")
+        self.assertIn("mlx-community/Qwen3.5-9B-MLX-4bit", specs)
+        self.assertNotIn("cutroom.vllm_backend", sys.modules)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,6 @@ if ! command -v brew >/dev/null; then
   exit 1
 fi
 print 'Installing free local video and AI tools. No subscriptions or paid APIs are used.'
-HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg-full whisper-cpp yt-dlp ollama uv
+HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg-full whisper-cpp yt-dlp uv
 print 'Tools installed. Open Launch.command, then Local models to download the models.'
 read -k 1 '?Press any key to close.'

@@ -1,3 +1,11 @@
+# Cutroom desktop app
+
+Open **Cutroom.app** on your Desktop. It starts the existing local studio and opens it in a native Mac window, with upload dialogs, video playback and file-save dialogs. No Terminal command is needed for normal use. Closing or quitting the desktop window leaves the background studio and its jobs running. The app menu also offers Open in Browser.
+
+This desktop window uses the original project and its existing models/data; keep that project folder in place. It does not fix or bypass the pending automatic editing acceptance checks described in `VERIFICATION.md`.
+
+To rebuild from a new project location, double-click **Build Desktop.command** (requires Apple's Command Line Tools). It creates `Cutroom.app` beside the project. Existing apps are not overwritten; choose another output with `./"Build Desktop.command" --output /path/to/Cutroom.app`. The bundle contains a native Swift/AppKit/WebKit executable, a local icon and the path to the studio. Model weights remain in the project folder.
+
 # Use Cutroom without this chat
 
 ## On this Mac
@@ -45,4 +53,16 @@ An internet-hosted multi-user version needs authentication, isolation, persisten
 
 ## Current test status
 
-The interface, local models, renderer, checkpoint system, and source import are available to test. A real 72.1-second manually selected renderer preview passed technical checks. The full autonomous reference-video run remains in progress; no promise of ten qualifying results, virality, rights clearance, or platform payouts is made. See [VERIFICATION.md](VERIFICATION.md).
+The interface, local models, renderer, checkpoint system, and source import are available to test. The user approved the 71.72-second portrait editing preview. Native vLLM Metal model calibration and hardware rendering passed their measured checks. The full autonomous reference-video run remains in progress; no promise of ten qualifying results, virality, rights clearance, or platform payouts is made. See [VERIFICATION.md](VERIFICATION.md).
+
+## When another model server is running
+
+Cutroom waits before loading its model when it detects another vLLM server on the Mac. The project shows **Waiting for your other model server**. You can leave the browser closed: the job continues automatically once that other server closes, or use **Stop & save progress** to cancel the wait. Cutroom never stops another project's model server. The full automatic reference-video acceptance test remains unfinished; see `VERIFICATION.md` for current failures and fixes.
+
+## Authorized browser import denied by macOS
+
+Checking the browser-session box authorizes Cutroom; it does not override macOS privacy controls. Safari and Chrome directory checks on this Mac returned `Operation not permitted`. Chrome's downloader reported that as a missing database, so the importer now checks authorized Chrome directory access before downloading and reports the OS denial accurately.
+
+For browser-session imports, the next permission step is **System Settings → Privacy & Security → Full Disk Access → add/enable Cutroom.app** from the Desktop. This is broad access to protected files, not just a YouTube permission. A local video upload avoids needing browser access. [Apple's explanation of Full Disk Access](https://support.apple.com/en-au/guide/mac-help/mchl211c911f/mac).
+
+Launch the backend through the Cutroom desktop app. After changing the permission, the local backend must be restarted as well as the window; closing the window alone intentionally leaves that backend running. The assistant can stop the local studio, reopen the desktop app and retry the saved project after the user grants permission. macOS permission changes require the user; the app does not grant them automatically. The authorized Chrome retry remains blocked until access is available, and a successful download has not been claimed.

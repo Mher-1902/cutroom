@@ -101,3 +101,41 @@ def prefer(studio,job,source,folder,segments,language,duration):
             studio.event(job,'Uploader text did not match the original audio transcript closely enough; retaining local ASR.')
     runtime.atomic_json(folder/'transcript-provenance.json',provenance)
     return segments
+
+
+def discovery(studio,job,source,language,duration):
+    """Optional human/automatic captions for scouting, never trusted final text."""
+    if 'url' not in job['source']:
+        return None
+    from .resources import ResourcePause
+    cache=Path(job.get('imported_file',source)).parent
+    marker=cache/'discovery-captions.json'
+    if marker.exists():
+        saved=json.loads(marker.read_text())
+        if saved.get('requested_language')==language and (cache/saved['file']).is_file():
+            items=parse_json3(json.loads((cache/saved['file']).read_text()),duration)
+            if items:return items,saved['language'],saved['origin']
+    base=[local_models.binary('yt-dlp'),'--ignore-config','--no-playlist','--no-progress',*auth_arguments(job['config'])]
+    try:
+        raw=json.loads(studio.run(job,base+['--skip-download','--dump-single-json','--',job['source']['url']]))
+        native=language if language!='auto' else str(raw.get('language') or '').split('-')[0]
+        for field,flag,origin in [('subtitles','--write-subs','uploader_captions_discovery'),
+                                  ('automatic_captions','--write-auto-subs','automatic_captions_discovery')]:
+            available=raw.get(field,{})
+            codes=[code for code in available if code!='live_chat' and native and code.split('-')[0]==native]
+            if not codes:continue
+            code=native if native in codes else codes[0]
+            # Only a source-language track; never substitute a translated dub.
+            studio.run(job,base+['--skip-download',flag,'--sub-langs',code,'--sub-format','json3',
+                                '-o',str(cache/'discovery'),'--',job['source']['url']])
+            target=cache/f'discovery.{code}.json3'
+            items=parse_json3(json.loads(target.read_text()),duration)
+            if items:
+                runtime.atomic_json(marker,{'requested_language':language,'language':code.split('-')[0],
+                                            'file':target.name,'origin':origin})
+                return items,code.split('-')[0],origin
+    except (OSError,ValueError,RuntimeError) as exc:
+        if isinstance(exc,ResourcePause):raise
+        studio.check_cancel(job['id'])
+        studio.event(job,'Discovery captions unavailable; using checkpointed local transcription. '+str(exc)[-100:])
+    return None

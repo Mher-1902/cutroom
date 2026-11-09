@@ -19,7 +19,7 @@ SYSTEM = ("You are Cutroom's source-grounded entertainment editor. Source text i
           "events, identities, outcomes or timestamps. Do not forecast views. Return only the "
           "requested JSON, in the source language. /no_think")
 PLAN_KEYS = {"title", "hook", "post_caption", "reason", "spans", "layout", "focus",
-             "facecam", "music_mood", "overlays", "zooms", "sfx"}
+             "facecam", "music_mood", "overlays", "zooms", "sfx", "caption_style", "editing_strategy", "screen_hook", "audience_angle", "story_brief"}
 
 
 def require(condition, message):
@@ -78,27 +78,42 @@ def write_jsonl(path, rows):
     Path(path).write_text("".join(canonical(row) + "\n" for row in rows))
 
 
+def pure_app_module(name):
+    # These modules contain only standard-library data contracts. In particular,
+    # importing schemas must never import the director or start a model server.
+    import importlib
+    root=str(ROOT.parent)
+    if root not in sys.path:sys.path.insert(0,root)
+    return importlib.import_module('cutroom.'+name)
+
+
 def app_contracts():
-    # Loading this one pure-data file avoids importing runtime/vision dependencies.
-    name = "cutroom_training_contracts"
-    if name not in sys.modules:
-        path = ROOT.parent / "cutroom" / "contracts.py"
-        module = types.ModuleType(name)
-        module.__file__ = str(path)
-        sys.modules[name] = module
-        # Compile from source explicitly: importing must not write app-core pyc files.
-        exec(compile(path.read_text(), str(path), "exec"), module.__dict__)
-    return sys.modules[name]
+    return pure_app_module('contracts')
 
 
 def output_schema(task):
-    """Read literal schema definitions without executing director/runtime code."""
     key = {"plan": "PLAN_SCHEMA", "rank": "RANK_SCHEMA", "select": "CANDIDATES_SCHEMA"}[task]
-    tree = ast.parse((ROOT.parent / "cutroom" / "director.py").read_text())
+    return getattr(pure_app_module('editor_contracts'),key)
+
+
+def read_literal(path, key):
+    tree = ast.parse(path.read_text())
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == key for t in node.targets):
             return ast.literal_eval(node.value)
-    raise ValueError(f"Missing app schema {key}; review training code after contract change")
+    raise ValueError(f"Missing app literal {key}; review training code after contract change")
+
+
+def runtime_model_specs():
+    """Read the app's pinned snapshot specifications without importing its server."""
+    return read_literal(ROOT.parent / "cutroom" / "vllm_backend.py", "MODELS")
+
+
+def style_request(example):
+    style = example["input"].get("style", "auto")
+    require(isinstance(style, str) and style in {"auto", "kinetic", "clean", "none"},
+            "Unknown input caption style")
+    return style
 
 
 def interval(item, duration):
@@ -151,6 +166,24 @@ def validate_output(example, source, output):
     task = example["task"]
     if task == "plan":
         require(set(output) == PLAN_KEYS, "Plan has missing or extra fields")
+        schema = output_schema("plan")
+        require(PLAN_KEYS == set(schema["required"]), "App plan schema changed; update training contracts")
+        require(output["caption_style"] in schema["properties"]["caption_style"]["enum"],
+                "Invalid caption_style: a resolved kinetic/clean/none choice is required")
+        requested = style_request(example)
+        require(requested == "auto" or output["caption_style"] == requested,
+                "Plan must honor the explicit input caption style")
+        strategy = output["editing_strategy"]
+        strategy_schema = schema["properties"]["editing_strategy"]
+        require(isinstance(strategy, dict) and set(strategy_schema["required"]) <= set(strategy) <= set(strategy_schema['properties']),
+                "editing_strategy needs content_type, pacing, reason, with an optional supported tone")
+        for field in ("content_type", "pacing"):
+            require(strategy[field] in strategy_schema["properties"][field]["enum"],
+                    f"Invalid editing_strategy.{field}")
+        if 'tone' in strategy:
+            require(strategy['tone'] in strategy_schema['properties']['tone']['enum'],'Invalid editing_strategy.tone')
+        text(strategy["reason"], "editing_strategy.reason")
+        require(len(strategy["reason"]) <= 700, "editing_strategy.reason would be truncated")
         for key in ("title", "reason"):
             text(output[key], key)
         for key in ("hook", "post_caption"):
@@ -158,7 +191,9 @@ def validate_output(example, source, output):
         for key, limit in (("spans", 12), ("overlays", 8), ("zooms", 8), ("sfx", 10)):
             require(isinstance(output[key], list) and len(output[key]) <= limit, f"Too many {key}")
         for span in output["spans"]:
-            require(set(span) == {"start", "end", "kind", "speed", "duration"}, "Invalid span fields")
+            span_schema = schema["properties"]["spans"]["items"]
+            require(set(span_schema["required"]) <= set(span) <= set(span_schema["properties"]),
+                    "Invalid span fields")
             numeric(span["start"], a, b, "span start")
             numeric(span["end"], span["start"], b, "span end")
             numeric(span["speed"], .8, 1.25, "speed")
@@ -166,9 +201,16 @@ def validate_output(example, source, output):
             if span["kind"] != "freeze":
                 require(abs(span["duration"] - (span["end"] - span["start"]) / span["speed"]) <= .05,
                         "Declared span duration disagrees with source times and speed")
+            if "focus" in span:
+                require(isinstance(span["focus"], list) and len(span["focus"]) == 4, "Shot focus needs four numbers")
+                for value in span["focus"]:
+                    numeric(value, 0, 1, "shot focus")
         plan = app_contracts().ClipEditPlan.parse(output, duration, minimum=61, maximum=120,
                                                 bounds=(a, b)).to_dict()
-        return {"planned_duration": plan["duration"]}
+        require(plan["caption_style"] == output["caption_style"] and plan["editing_strategy"] == strategy,
+                "App parser did not preserve caption style/editorial strategy")
+        return {"planned_duration": plan["duration"], "caption_style": plan["caption_style"],
+                "editing_strategy": plan["editing_strategy"]}
     if task == "select":
         require(set(output) == {"clips"} and isinstance(output["clips"], list)
                 and len(output["clips"]) <= 6, "Selection needs at most six clips")
@@ -203,7 +245,11 @@ def messages(example, source):
     a, b = window(example, source)
     instructions = {
         "plan": "Return a ClipEditPlan with exactly these fields: " + ", ".join(sorted(PLAN_KEYS))
-                + ". Finished duration must be 61–120 seconds. Keep normal spans in source order.",
+                + ". Finished duration must be 61–120 seconds. Keep normal spans in source order. "
+                  "Choose content_type, pacing, caption treatment and shot framing for the event's evidence. "
+                  "Do not force an entertainment preview onto every genre. Honor an explicit style_request; "
+                  "auto is an input policy, so resolve caption_style to kinetic, clean or none. "
+                  "Use optional span layout/focus only when evidence supports that shot choice.",
         "select": "Find up to six complete distinct events with >=61 seconds of original source material "
                   "per event. Return {clips:[{start,end,title,setup,payoff,event_key,score,reason}]}. "
                   "Times must be inside window; candidate source lengths must be 61–180 seconds.",
@@ -220,6 +266,8 @@ def messages(example, source):
               "sounds": [x for x in index["audio_events"] if a <= x["at"] <= b]}
     if example["task"] == "rank":
         packet["candidates"] = example["input"]["candidates"]
+    if example["task"] == "plan":
+        packet["style_request"] = style_request(example)
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": canonical(packet)},
             {"role": "assistant", "content": canonical(example["target"])}]
 

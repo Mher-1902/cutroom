@@ -78,9 +78,45 @@ def scenes(video, output):
     atomic(output,{"cuts": [a.get_seconds() for a, b in found][1:]})
 
 
+def retrieve(source, output, cache):
+    """CPU-only semantic proposals; the vision scouts still judge real evidence."""
+    import numpy as np
+    import torch
+    from transformers import AutoTokenizer, AutoModel
+    torch.set_num_threads(2)
+    name='intfloat/multilingual-e5-small'
+    tokenizer=AutoTokenizer.from_pretrained(name,cache_dir=cache)
+    model=AutoModel.from_pretrained(name,cache_dir=cache).eval().to('cpu')
+    segments=json.loads(source.read_text())['segments']
+    passages=[]
+    for item in segments:
+        if passages and item['end']-passages[-1]['start']<=45 and len(passages[-1]['text'])+len(item['text'])<900:
+            passages[-1]['end']=item['end'];passages[-1]['text']+=' '+item['text']
+        else:
+            passages.append({k:item[k] for k in ('start','end','text')})
+    queries=['a funny unexpected reaction with a punchline', 'a tense challenge with a surprising outcome',
+             'an exciting reveal that answers a question', 'an emotional moment and what caused it',
+             'an impressive visual or gameplay surprise', 'an interesting story with a clear ending']
+    def encode(texts):
+        result=[]
+        for offset in range(0,len(texts),8):
+            inputs=tokenizer(texts[offset:offset+8],max_length=512,padding=True,truncation=True,return_tensors='pt')
+            with torch.inference_mode():
+                hidden=model(**inputs).last_hidden_state
+                mask=inputs['attention_mask'].unsqueeze(-1)
+                pooled=(hidden*mask).sum(1)/mask.sum(1).clamp(min=1)
+                result.append(torch.nn.functional.normalize(pooled,p=2,dim=1).cpu().numpy())
+        return np.concatenate(result) if result else np.empty((0,384))
+    query_vectors=encode(['query: '+q for q in queries])
+    embeddings=encode(['passage: '+p['text'] for p in passages])
+    scores=(embeddings@query_vectors.T).max(axis=1) if passages else []
+    atomic(output,{'model':name,'revision':getattr(model.config,'_commit_hash',None),'device':'cpu',
+                   'passages':[{'start':p['start'],'end':p['end'],'score':round(float(score),4)} for p,score in zip(passages,scores)]})
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("task", choices=["audio", "align", "scenes", "prepare-audio","prepare-align"])
+    parser.add_argument("task", choices=["audio", "align", "scenes", "retrieve", "prepare-audio","prepare-align"])
     parser.add_argument("--source", type=Path)
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output", type=Path)
@@ -97,6 +133,8 @@ def main():
         align(args.source, args.input, args.output, str(args.cache))
     elif args.task == "scenes":
         scenes(args.source, args.output)
+    elif args.task == 'retrieve':
+        retrieve(args.source,args.output,str(args.cache))
     elif args.task=='prepare-audio':
         from transformers import AutoFeatureExtractor, ASTForAudioClassification
         name = "MIT/ast-finetuned-audioset-10-10-0.4593"

@@ -55,6 +55,16 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/state":
                 self.json_response({"token": TOKEN, "version":2,"health": runtime.health(STUDIO.data),
                                     "setup": STUDIO.setup_state, "jobs": STUDIO.list_jobs()})
+            elif re.fullmatch(r'/api/uploads/[a-f0-9]{32}',path):
+                self.json_response(STUDIO.upload_store.status(path.split('/')[-1]))
+            elif re.fullmatch(r'/api/jobs/[a-f0-9]{32}/tasks',path):
+                ident=path.split('/')[3]
+                STUDIO.get(ident)
+                from cutroom.task_store import TaskStore
+                self.json_response({'tasks':TaskStore.snapshot(STUDIO.jobs_dir/ident)})
+            elif re.fullmatch(r'/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/editor',path):
+                parts=path.split('/')
+                self.json_response(STUDIO.editor(parts[3],parts[5]))
             elif path.startswith("/api/jobs/"):
                 self.json_response(STUDIO.get(path.split("/")[-1]))
             elif path.startswith("/files/"):
@@ -89,12 +99,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/upload":
                 self.upload()
                 return
+            if re.fullmatch(r'/api/uploads/[a-f0-9]{32}/chunk',path):
+                length=int(self.headers.get('Content-Length',0))
+                offset=int(parse_qs(urlparse(self.path).query).get('offset',['-1'])[0])
+                result,consumed=STUDIO.upload_store.append(path.split('/')[3],offset,length,self.rfile)
+                if not consumed:self.close_connection=True
+                self.json_response(result)
+                return
             length = int(self.headers.get("Content-Length", 0))
             if length > 20000:
                 raise ValueError("Request is too large.")
             raw = json.loads(self.rfile.read(length) or b"{}")
             if path == "/api/jobs":
                 self.json_response(STUDIO.create(raw), 201)
+            elif path == '/api/uploads':
+                self.json_response(STUDIO.upload_store.create(raw.get('name',''),raw.get('bytes')),201)
             elif path == "/api/setup":
                 STUDIO.start_setup()
                 self.json_response({"ok": True})
@@ -106,6 +125,9 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/refine",path):
                 parts=path.split("/")
                 self.json_response(STUDIO.refine(parts[3],parts[5],raw.get("notes","")))
+            elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/style",path):
+                parts=path.split('/')
+                self.json_response(STUDIO.restyle(parts[3],parts[5],raw))
             else:
                 self.json_response({"error": "Not found"}, 404)
         except (ValueError, TypeError, KeyError) as exc:
@@ -199,17 +221,19 @@ def main():
         fcntl.flock(instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print("Cutroom is already running. Open http://127.0.0.1:8765", flush=True)
+        instance_lock.close()
         return
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as exc:
         print(f"Cannot open port {args.port}: {exc}", flush=True)
+        instance_lock.close()
         return
     STUDIO = Studio(ROOT)
     server.daemon_threads = True
     atexit.register(STUDIO.close)
     try:
-        local_models.start_server(STUDIO.data)
+        runtime.initialize(STUDIO.data)
     except (RuntimeError, OSError) as exc:
         print("Model setup: " + str(exc), flush=True)
     url = f"http://127.0.0.1:{args.port}"
@@ -226,6 +250,7 @@ def main():
     finally:
         server.server_close()
         STUDIO.close()
+        instance_lock.close()
 
 
 if __name__ == "__main__":

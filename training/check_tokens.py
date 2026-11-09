@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-from common import read_jsonl, require, write_jsonl
+from common import parse_json, read_jsonl, require, write_jsonl
 
 
 def main():
@@ -15,6 +15,9 @@ def main():
     parser.add_argument("--max-seq-length", type=int, default=2048)
     parser.add_argument("--memory-gate-out", type=Path, help="New directory with longest train/valid examples only")
     args = parser.parse_args()
+    manifest = parse_json((args.data / "manifest.json").read_text())
+    require(manifest.get("format_version") == 2,
+            "Rebuild prepared data for caption_style/editing_strategy before token checks")
     require(args.tokenizer.is_dir(), "Tokenizer must already exist locally")
     # Deliberately avoid mlx_lm.load: AutoTokenizer reads tokenizer/config only.
     from transformers import AutoTokenizer

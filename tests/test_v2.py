@@ -1,4 +1,5 @@
 import json
+import queue
 from pathlib import Path
 import tempfile
 import threading
@@ -15,6 +16,75 @@ def plan(spans=None):
                               'focus':[0,0,1,1],'music_mood':'none','layout':'fit'},100,minimum=30).to_dict()
 
 class TimelineTests(unittest.TestCase):
+    def test_muted_cold_open_does_not_invent_or_repeat_spoken_captions(self):
+        raw={'spans':[{'kind':'teaser','start':70,'end':72}, {'start':10,'end':75}],
+             'screen_hook':{'enabled':True,'text':'WAIT… THIS IS GTA?!','style':'hype','emphasis':'GTA'}}
+        edit=ClipEditPlan.parse(raw,100,60,90).to_dict()
+        self.assertTrue(edit['spans'][0]['mute'])
+        self.assertEqual(edit['duration'],67)
+        mapped=remap_words([{'start':70,'end':71,'text':'original dialogue','words':[]}],edit)
+        self.assertEqual(len(mapped),1)
+        self.assertEqual(mapped[0]['start'],62)
+        ass,_,_=render_v2.make_ass(edit,[],{'blocks':[]},style='none')
+        self.assertIn('\\fs122',ass)
+        self.assertIn('GTA?!',ass)
+        self.assertNotIn('REPLAY',ass)
+        with self.assertRaises(ValueError):
+            ClipEditPlan.parse({'spans':[{'kind':'teaser','start':70,'end':74},{'start':10,'end':75}]},100,60,90)
+
+    def test_editor_can_burn_in_a_hook_without_changing_speech_or_duplicating_it(self):
+        raw={'spans':[{'start':10,'end':80}], 'focus':[0,0,1,1],
+             'screen_hook':{'enabled':True,'text':'Who takes the job?'},
+             'overlays':[{'at':0,'duration':3,'kind':'hook','text':'Old hook'}]}
+        edit=ClipEditPlan.parse(raw,100,60,90).to_dict()
+        self.assertEqual([o['text'] for o in edit['overlays']],['Who takes the job?'])
+        ass,mapped,_=render_v2.make_ass(edit,[],{'blocks':[]},style='none')
+        self.assertIn('Who takes the job?',ass)
+        self.assertIn('0:00:00.00,0:00:03.00,Hook',ass)
+        self.assertEqual(mapped,[])
+        raw['screen_hook']={'enabled':False,'text':''}
+        self.assertEqual(ClipEditPlan.parse(raw,100,60,90).to_dict()['overlays'],[])
+
+    def test_sixty_to_ninety_preset_passes_but_outside_lengths_fail(self):
+        for length in (60,75,90):
+            edit=ClipEditPlan.parse({'spans':[{'start':0,'end':length}]},180,60,90).to_dict()
+            self.assertEqual(edit['duration'],length)
+        for length in (59,91):
+            with self.assertRaises(ValueError):
+                ClipEditPlan.parse({'spans':[{'start':0,'end':length}]},180,60,90)
+    def test_automatic_treatment_can_differ_for_conversation_and_challenge(self):
+        base={'spans':[{'start':10,'end':80}],'layout':'crop','focus':[.3,0,.3,1]}
+        talk=ClipEditPlan.parse({**base,'caption_style':'clean','music_mood':'none',
+            'editing_strategy':{'content_type':'conversation','pacing':'patient','reason':'Preserve the complete explanation.'}},100).to_dict()
+        challenge=ClipEditPlan.parse({**base,'caption_style':'kinetic','music_mood':'tension',
+            'editing_strategy':{'content_type':'challenge','pacing':'varied','reason':'Keep the attempt and outcome.'}},100).to_dict()
+        speech=[{'start':12,'end':14,'text':'one careful step','words':[{'start':12,'end':12.5,'text':'one'},
+            {'start':12.5,'end':13,'text':'careful'},{'start':13,'end':14,'text':'step'}]}]
+        quiet=render_v2.make_ass(talk,speech,{'blocks':[]},style='auto')[0]
+        animated=render_v2.make_ass(challenge,speech,{'blocks':[]},style='auto')[0]
+        self.assertNotIn('\\fscx96',quiet);self.assertIn('\\fscx96',animated)
+        with self.assertRaises(ValueError):ClipEditPlan.parse({**base,'editing_strategy':{'content_type':'invented','pacing':'brisk'}},100)
+
+    def test_framing_repair_keeps_unaffected_portrait_shots(self):
+        edit=plan([{'start':10,'end':30,'layout':'crop','focus':[.3,0,.3,1]},
+                   {'start':30,'end':50,'layout':'crop','focus':[.2,0,.3,1]}])
+        fixed=director.apply_revision_actions(edit,{'problems':[{'action':'fit_frame','at':25}]})
+        self.assertEqual(fixed['spans'][0]['layout'],'crop');self.assertEqual(fixed['spans'][1]['layout'],'fit')
+        self.assertEqual(fixed['mapping'],edit['mapping'])
+
+    def test_shot_framing_is_bounded_and_reviewer_can_restore_wide_action(self):
+        edit=plan([{'start':10,'end':30,'layout':'crop','focus':[.3,0,.3,1]},
+                   {'start':30,'end':50,'layout':'fit'}])
+        self.assertEqual(edit['spans'][0]['focus'],[.3,0,.3,1])
+        self.assertEqual(edit['mapping'][0]['out_end'],20)
+        crop=render_v2.layout_filter('[in]','[out]',edit,720,1280,{'mode':'challenge','blocks':[]},edit['spans'][0],{'width':1920,'height':1080})
+        wide=render_v2.layout_filter('[in]','[out]',edit,720,1280,{'mode':'challenge','blocks':[]},edit['spans'][1],{'width':1920,'height':1080})
+        self.assertNotIn('boxblur',crop);self.assertIn('boxblur',wide)
+        fixed=director.apply_revision_actions(edit,{'problems':[{'action':'fit_frame'}]})
+        self.assertTrue(all('layout' not in s and 'focus' not in s for s in fixed['spans']))
+        for bad in ({'layout':'split'},{'focus':[.8,0,.5,1]}):
+            with self.assertRaises(ValueError):plan([{'start':10,'end':50,**bad}])
+
     def test_cut_speed_freeze_replay_captions(self):
         edit=plan([{'start':10,'end':30,'speed':1.25},
                    {'kind':'freeze','start':30,'end':30,'duration':1},
@@ -63,6 +133,8 @@ class TimelineTests(unittest.TestCase):
         ass,mapped,_=render_v2.make_ass(edit,[],{'blocks':[]},watermark=settings)
         self.assertIn('Source: @creator',ass)
         self.assertIn('\\alpha&HBF&',ass)
+        self.assertIn('\\fs28',ass)
+        self.assertIn('\\shad1\\blur0.3',ass)
         self.assertNotIn('{\\pos(0,0)}',ass)
         self.assertEqual(mapped,[])
         with self.assertRaises(ValueError):core.settings({'watermark_opacity':float('nan')})
@@ -81,6 +153,59 @@ class TimelineTests(unittest.TestCase):
         self.assertIn('hello',render_v2.srt(remap_words(segments,edit)))
 
 class ImportTests(unittest.TestCase):
+    def test_chrome_os_denial_is_not_misreported_as_a_missing_cookie_file(self):
+        config={'youtube_auth':{'consent':True,'browser':'chrome'}}
+        with patch.object(source_media.sys,'platform','darwin'),patch.object(source_media.os,'scandir',side_effect=PermissionError):
+            with self.assertRaisesRegex(RuntimeError,'macOS blocked access'):
+                source_media.browser_access_preflight(config)
+        with patch.object(source_media.os,'scandir') as scan:
+            source_media.browser_access_preflight({})
+        scan.assert_not_called()
+
+    def test_saved_consent_is_not_reported_as_missing_when_safari_access_is_denied(self):
+        config={'youtube_auth':{'consent':True,'browser':'safari'}}
+        denied=source_media.import_error("ERROR: Operation not permitted: /private/Cookies.binarycookies",config)
+        self.assertIn('macOS blocked access',denied)
+        self.assertIn('authorization was saved',denied)
+        self.assertNotIn('/private',denied)
+        self.assertNotIn('No browser cookies were read automatically',denied)
+        rejected=source_media.import_error('Sign in to confirm your age',config)
+        self.assertIn('did not accept that session',rejected)
+        anonymous=source_media.import_error('Sign in to confirm your age',{})
+        self.assertIn('explicitly enable',anonymous)
+
+    def test_new_project_keeps_the_selected_short_duration(self):
+        from cutroom.engine import Studio
+        with tempfile.TemporaryDirectory() as name:
+            studio=Studio.__new__(Studio)
+            studio.data=Path(name);studio.jobs_dir=Path(name)/'jobs';studio.jobs_dir.mkdir()
+            studio.setup_state={'running':False};studio.jobs={};studio.cancel_flags={}
+            studio.lock=threading.RLock();studio.queue=queue.Queue()
+            chosen={'director':runtime.DIRECTORS[0],'verified':True}
+            health={'ready':True,'models':[runtime.DIRECTORS[0],runtime.VISION_MODEL]}
+            with patch.object(runtime,'profile',return_value=chosen),patch.object(runtime,'health',return_value=health):
+                result=studio.create({'url':'https://www.youtube.com/watch?v=_c2e1NcI3Sc','count':3,'min_duration':15,'max_duration':29})
+            self.assertEqual(result['config']['count'],3)
+            self.assertEqual((result['config']['min_duration'],result['config']['max_duration']),(15,29))
+            self.assertEqual(studio.queue.get_nowait(),result['id'])
+
+    def test_short_duration_presets_survive_planning_and_export_checks(self):
+        for low,high,length in [(15,29,25),(30,59,45),(61,120,72)]:
+            with self.subTest(low=low):
+                config=core.settings({'min_duration':low,'max_duration':high})
+                edit=ClipEditPlan.parse({'spans':[{'start':0,'end':length}]},180,low,high).to_dict()
+                self.assertEqual(edit['duration'],length)
+                class Studio:
+                    def run(self,job,args,**kwargs):
+                        if '-show_format' in args:
+                            return json.dumps({'format':{'duration':length},'streams':[{'codec_type':'video','width':720,'height':1280},{'codec_type':'audio'}]})
+                        return '{"input_i":"-16","input_tp":"-2"}'
+                with patch('cutroom.render_v2.local_models.binary',return_value='tool'):
+                    qc=render_v2.technical_qc(Studio(),{'config':config},Path('clip.mp4'),length,720)
+                    wrong=render_v2.technical_qc(Studio(),{'config':{**config,'min_duration':100,'max_duration':120}},Path('clip.mp4'),length,720)
+                self.assertTrue(qc['passed'],qc)
+                self.assertFalse(wrong['passed'])
+
     def test_timestamp_hint_never_trims_source(self):
         url,hint=source_media.normalize_url('https://www.youtube.com/watch?v=_c2e1NcI3Sc&t=20m21s')
         self.assertEqual(url,'https://www.youtube.com/watch?v=_c2e1NcI3Sc');self.assertEqual(hint,1221)
@@ -101,7 +226,8 @@ class ImportTests(unittest.TestCase):
         self.assertGreater(core.settings({})['min_duration'],60)
         with tempfile.TemporaryDirectory() as d:
             self.assertFalse(runtime.profile(d)['verified'])
-            self.assertNotIn('4b',runtime.profile(d)['director'])
+            self.assertNotRegex(runtime.profile(d)['director'],r'(?i)(?:^|[-:/])4b(?:[-:/]|$)')
+            self.assertRegex(runtime.profile(d)['director'],r'(?i)14b')
 
 class CaptionImportTests(unittest.TestCase):
     def test_duplicate_styling_and_zero_width_characters_are_removed(self):

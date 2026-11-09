@@ -24,7 +24,7 @@ def settings(raw):
     result = {
         "count": count, "min_duration": low, "max_duration": high,
         "brief": str(raw.get("brief", ""))[:2500],
-        "style": raw.get("style", "kinetic"), "layout": raw.get("layout", "auto"),
+        "style": raw.get("style", "auto"), "layout": raw.get("layout", "auto"),
         "music": raw.get("music", "auto"), "sfx": bool(raw.get("sfx", True)),
         "language": str(raw.get("language", "auto")),
         "model": str(raw.get("model", "qwen3:4b")),
@@ -33,9 +33,9 @@ def settings(raw):
         "min_score": int(raw.get("min_score", 70)),
         "watermark_text": str(raw.get("watermark_text", "")).strip()[:64],
         "watermark_position": raw.get("watermark_position", "top-right"),
-        "watermark_opacity": float(raw.get("watermark_opacity", .25)),
+        "watermark_opacity": float(raw.get("watermark_opacity", .20)),
     }
-    if result["style"] not in {"kinetic", "clean", "none"} or result["layout"] not in {"auto", "fit", "crop", "split"}:
+    if result["style"] not in {"auto", "kinetic", "clean", "none"} or result["layout"] not in {"auto", "fit", "crop", "split"}:
         raise ValueError("Unknown caption style or layout.")
     if result["music"] not in {"auto", "ambient", "none", "upload"} or result["resolution"] not in {720, 1080}:
         raise ValueError("Unknown soundtrack or resolution.")
@@ -49,7 +49,7 @@ def settings(raw):
         raise ValueError("Language must be auto or a two/three-letter language code.")
     for key in ("model", "judge_model"):
         if not re.fullmatch(r"[a-zA-Z0-9_.:/-]{1,160}", result[key]) or "cloud" in result[key].lower():
-            raise ValueError("Select a downloaded local Ollama model.")
+            raise ValueError("Select a downloaded local model.")
     return result
 
 
