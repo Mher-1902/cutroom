@@ -245,6 +245,46 @@ def payload(model, system, prompt, schema, images, predict):
             "structured_outputs": {"json": schema, "disable_any_whitespace": True}}
 
 
+def fit_context(body):
+    """Reserve the whole response using the served model's multimodal tokenizer.
+
+    Shrink only analysis-image previews if necessary, retaining every image and
+    all source text. Model context, GPU settings and rendered video are untouched.
+    """
+    def count():
+        raw={key:body[key] for key in ('model','messages','chat_template_kwargs')}
+        request=urllib.request.Request(BASE_URL+'/tokenize',data=json.dumps(raw).encode(),
+                                       headers={'Content-Type':'application/json'})
+        with urllib.request.urlopen(request,timeout=120) as response:
+            return json.load(response)
+    resized=0
+    for attempt in range(5):
+        measured=count()
+        tokens,limit=int(measured['count']),int(measured['max_model_len'])
+        if tokens+body['max_tokens']+32<=limit:
+            return {'prompt_tokens':tokens,'reserved_output_tokens':body['max_tokens'],
+                    'max_model_len':limit,'image_resize_rounds':resized}
+        content=body['messages'][1]['content']
+        images=[item for item in content if item.get('type')=='image_url'] if isinstance(content,list) else []
+        if not images or attempt==4:
+            raise RuntimeError(f'The AI evidence packet needs {tokens} input tokens plus {body["max_tokens"]} response tokens; its context limit is {limit}. Source text was preserved.')
+        from io import BytesIO
+        from PIL import Image
+        changed=False
+        for item in images:
+            url=item['image_url']['url']
+            with Image.open(BytesIO(base64.b64decode(url.split(',',1)[1]))) as source:
+                size=(max(160,round(source.width*.8)),max(160,round(source.height*.8)))
+                if size[0]>=source.width or size[1]>=source.height:continue
+                output=BytesIO()
+                source.convert('RGB').resize(size,Image.Resampling.LANCZOS).save(output,format='JPEG',quality=88)
+            item['image_url']['url']='data:image/jpeg;base64,'+base64.b64encode(output.getvalue()).decode()
+            changed=True
+        if not changed:
+            raise RuntimeError('The AI evidence packet is too large even with bounded analysis images. Source text was preserved.')
+        resized+=1
+
+
 def stream(body, cancelled, register, unregister):
     request = urllib.request.Request(BASE_URL + "/v1/chat/completions", data=json.dumps(body).encode(),
                                      headers={"Content-Type": "application/json"})

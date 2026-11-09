@@ -270,6 +270,33 @@ class StoryTests(unittest.TestCase):
                 result=director.make_plan(studio,job,candidate,{'duration':36000,'mode':'story','blocks':[],'audio_events':[]},segments)
             self.assertGreaterEqual(result['start'],90)
 
+    def test_invalid_short_sentence_choice_retries_measured_duration_windows(self):
+        with tempfile.TemporaryDirectory() as name:
+            root=Path(name);studio=Studio(root);(root/'test').mkdir()
+            segments=[{'start':i,'end':i+5,'text':'The narrator explains one aspect of this topic.','words':[]}
+                      for i in range(0,180,5)]
+            candidate={'id':'a'*32,'start':0,'end':180,'title':'A narrated game explanation'}
+            chosen=[]
+            payload={'title':'The mechanic explained','post_caption':'One small detail changes how this mechanic works. Did you notice it?',
+                'complete':True,'cold_open':False,'framing':'fit','audience_angle':'useful_tip',
+                'caption_style':'clean','music_mood':'none','editing_strategy':{'content_type':'tutorial','tone':'informative','pacing':'balanced','reason':'Keep the explanation.'},
+                'callouts':[],'punch_ins':[],'sound_cues':[],'story_brief':brief()}
+            def model(studio,job,system,prompt,schema,**options):
+                props=schema['properties']
+                if 'start_id' in props:
+                    self.assertIn('60–90',prompt);self.assertIn('explainers',prompt)
+                    ids=props['start_id']['enum']
+                    return {'start_id':ids[0],'end_id':ids[1],'complete':True,'reason':'This is only ten seconds.'}
+                if 'window_id' in props and len(props['window_id']['enum'])>1:
+                    ident=props['window_id']['enum'][0];chosen.append(ident)
+                    return {'window_id':ident,'complete':True,'reason':'The measured topic and explanation fit.'}
+                return {**payload,'window_id':chosen[0]}
+            job={'id':'test','config':{'min_duration':60,'max_duration':90,'story_structure_version':1}}
+            with patch.object(director,'call',side_effect=model) as calls:
+                result=director.make_plan(studio,job,candidate,{'duration':180,'mode':'gameplay','blocks':[],'audio_events':[]},segments)
+            self.assertGreaterEqual(result['duration'],60);self.assertLessEqual(result['duration'],90)
+            self.assertEqual(result['selected_window_id'],chosen[0]);self.assertEqual(calls.call_count,5)
+
     def test_critic_context_excludes_a_neighboring_challenge(self):
         candidate={'start':0,'end':180,'fine_evidence':{'summary':'Wrong neighboring outcome',
                     'events':[{'at':10,'end':20,'description':'neighbor'},{'at':130,'end':140,'description':'retained'}]}}
