@@ -140,6 +140,7 @@ def chat(model, system, prompt, schema, images=None, cancelled=lambda: False, ke
             with _active_lock:
                 _active_responses.pop(key, None)
         try:
+            budget=vllm_backend.fit_context(body)
             result, usage = vllm_backend.stream(body, cancelled, register, unregister)
         except vllm_backend.IncompleteResponse as exc:
             # Private diagnostics live beside this job, never in public source
@@ -151,6 +152,7 @@ def chat(model, system, prompt, schema, images=None, cancelled=lambda: False, ke
         elapsed = time.time() - started
         if metrics is not None:
             metrics.append({"runtime": "vllm-metal", "model": model, "seconds": round(elapsed, 2),
+                "context_budget":budget,
                 "load_seconds": round(loaded-started, 2), "prompt_characters": len(prompt),
                 "image_count": len(images or []), "output_tokens": usage.get("completion_tokens"),
                 "prompt_tokens": usage.get("prompt_tokens"),

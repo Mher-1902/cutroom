@@ -163,7 +163,7 @@ def propose(studio, job, index, segments, folder):
     return ordered
 
 
-PLAN_RECOVERY_VERSION = 3
+PLAN_RECOVERY_VERSION = 4
 
 
 def validate_plan(raw, source_duration, minimum, maximum, bounds):
@@ -338,6 +338,8 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
         b=min(bounds[1],a+high)
         if low<=b-a<=high and not any(abs(a-x)<.5 and abs(b-y)<.5 for x,y in windows.values()):
             windows[f'W{len(windows)+1:03}']=[a,b]
+    windows={key:value for key,value in windows.items()
+             if not any(core.overlap_fraction({'start':value[0],'end':value[1]},clip)>.20 for clip in used)}
     if not windows:raise RuntimeError('Director could not produce a safe, valid timeline: no measured interval fits the requested duration')
     selection_schema={'type':'object','properties':{'window_id':{'type':'string','enum':list(windows)},
                       'complete':{'type':'boolean'},'reason':{'type':'string','maxLength':140}},
@@ -354,6 +356,7 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
           if not any(max(s['start'],c['start'])<min(s['end'],c['end']) for c in used)}
     if original_rows and not rows:
         raise RuntimeError('Director could not produce a safe, valid timeline: this source event is already represented in the collection')
+    chosen=None
     if rows:
         event_schema={'type':'object','properties':{
             'start_id':{'type':'string','enum':list(rows)},'end_id':{'type':'string','enum':list(rows)},
@@ -362,7 +365,10 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
         correction=''
         for attempt in range(2):
             event=call(studio,job,COMMON,
-                'Identify ONE complete entertainment event in this timestamped transcript. Return the ID where its '
+                f'Select a standalone {low}–{high}-second unit from this timestamped transcript. The ENTIRE retained interval must fit that range. '
+                'For narrated news, reviews and explainers, retain one topic/question, its substantive explanation and a supported takeaway; '
+                'a physical challenge or competition is not required. For a reaction, retain setup, reveal and response. '
+                'For actual gameplay/challenges, retain the objective, attempt and outcome. Return the ID where its '
                 'essential setup starts and the ID where its real outcome/resolution ends. Keep ONE challenge together; '
                 'do not combine the preceding challenge\'s prize with the next challenge\'s attempt. '
                 'For a competition, accepting a challenge or a countdown is NOT its final outcome. '
@@ -371,11 +377,12 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
                 'The suggested title may be wrong; choose the complete event supported by the transcript. '
                 'All material BETWEEN the two IDs will be retained. End on the actual payoff, not an ongoing attempt. '
                 'Set complete=false if no event is complete. Source boundaries are computed by code.\n'+
-                json.dumps({'suggested_title':candidate.get('title'),'already_used_source_intervals':[[c['start'],c['end']] for c in used],'source_segments':[
+                json.dumps({'suggested_title':candidate.get('title'),'source_title':job.get('source_metadata',{}).get('title',''),
+                    'requested_seconds':[low,high],'already_used_source_intervals':[[c['start'],c['end']] for c in used],'source_segments':[
                     {'id':ident,**{k:s[k] for k in ('start','end','text')}} for ident,s in rows.items()]},
                     ensure_ascii=False,separators=(',',':'))+correction,event_schema,predict=240)
             if event.get('complete') is not True or event.get('start_id') not in rows or event.get('end_id') not in rows:
-                raise RuntimeError('Director could not produce a safe, valid timeline: no complete event fits the requested duration')
+                break
             a,b=rows[event['start_id']]['start'],rows[event['end_id']]['end']
             duplicate=any(core.overlap_fraction({'start':a,'end':b},clip)>.20 for clip in used)
             if bounds[0]<=a<b<=bounds[1] and low<=b-a<=high and not duplicate:
@@ -385,11 +392,11 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
             correction=(f'\nThe measured interval was {b-a:.2f} seconds; this edit must be {low}–{high} seconds. '
                         'Choose different real sentence IDs retaining the SAME essential setup and outcome, or set complete=false. '
                         'Do not retain unrelated lead-in, trailing applause, photo instructions or an already used source event.')
-        else:
-            raise RuntimeError('Director could not produce a safe, valid timeline: the complete event does not fit the requested duration')
-    else:
+    if chosen is None:
         chosen=call(studio,job,COMMON,
-            'Select ONE measured visual-event window with a complete setup, development and visible outcome. '
+            f'Select ONE measured {low}–{high}-second window containing a complete standalone topic or event. '
+            'For narrated news/reviews/explainers, require a clear question/topic, substantive explanation and supported takeaway. '
+            'For gameplay/challenges/reactions, require setup, development and actual outcome or response. '
             'Each packet contains only its own interval observations. Do not borrow another window\'s payoff. '
             'Set complete=false if no complete event is supported. Return one supplied window_id.\n'+
             json.dumps({'proposed_title':candidate.get('title'),'packets':packets},ensure_ascii=False,separators=(',',':')),

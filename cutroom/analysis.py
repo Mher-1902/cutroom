@@ -302,7 +302,10 @@ def build_index(studio, job, source, folder, metadata, segments, language):
 def source_frames(studio, job, source, folder, positions, duration):
     """Seek only requested frames for long sources; retain legacy frame numbering."""
     if job.get('processing_strategy',{}).get('mode') != 'long_stream':
-        return [folder/'frames'/f'frame-{i+1:06}.jpg' for i in positions]
+        paths=[folder/'frames'/f'frame-{i+1:06}.jpg' for i in positions]
+        if any(not path.is_file() for path in paths):
+            raise RuntimeError('A requested source frame is missing from the extracted timeline.')
+        return paths
     directory=folder/'sparse-frames';directory.mkdir(exist_ok=True)
     paths=[]
     for at in positions:
@@ -323,7 +326,12 @@ def source_frames(studio, job, source, folder, positions, duration):
 def densify_regions(studio, job, folder, candidate, index):
     left, right = max(0,candidate['start']-8), min(index['duration'],candidate['end']+8)
     long=job.get('processing_strategy',{}).get('mode')=='long_stream'
-    desired = list(range(int(left), min(math.ceil(index['duration']),math.ceil(right))))
+    stop=min(math.ceil(index['duration']),math.ceil(right))
+    if not long:
+        # fps=1 rounds the last partial second; the container's audio may also
+        # outlast the video. Never send a nonexistent final JPEG to Vision.
+        stop=min(stop,len(list((folder/'frames').glob('frame-*.jpg'))))
+    desired = list(range(int(left),stop))
     known = {round(r['at']):r for b in index['blocks'] for r in b.get('regions',[]) if left<=r['at']<right}
     missing = [i for i in desired if i not in known]
     directory=folder/'fine-regions';directory.mkdir(exist_ok=True)
@@ -427,6 +435,8 @@ def inspect_candidate(studio, job, source, candidate, index, folder):
         nearest=min(samples,key=lambda sample:abs(sample['at']-expected),default=None)
         native_by_frame[ident]=({k:nearest.get(k,[]) for k in ('faces','texts')}
                                if nearest and abs(nearest['at']-expected)<.6 else {'faces':[],'texts':[]})
+        native_by_frame[ident]['faces']=native_by_frame[ident]['faces'][:4]
+        native_by_frame[ident]['texts']=[{**item,'text':item['text'][:80]} for item in native_by_frame[ident]['texts'][:4]]
     best=min(range(len(centers)),key=lambda i:abs(sorted(centers)[i]-(cues[0]['at'] if cues else (a+b)/2)))
     motion=[sheets[best],sheets[-1]] if best!=len(sheets)-1 else [sheets[0],sheets[-1]]
     images=[storyboard,*motion]

@@ -132,3 +132,30 @@ all short-length presets in actual AI production, dedicated active-speaker
 tracking, multilingual visual font coverage, and private reference selection
 recall are not claimed verified. CI checks run on Linux/macOS and compile native
 Mac helpers. Source packaging runs only after successful main checks.
+
+## 9 November: source-run failure recovery
+
+The 2,152.434-second GTA commentary source completed its broad analysis but
+produced no renders. One candidate's vision input used 8,090 of the 8,192 tokens,
+leaving only 102 tokens for its requested 1,400-token structured response. Another
+used 8,712 input tokens. The final partial source second also caused dense-region
+mapping to request a nonexistent JPEG; Vision misleadingly reported a 0×0 image.
+Six other candidates failed the sentence selector's duration arithmetic before
+rendering, rather than receiving a low editorial score.
+
+Dense-region sampling now respects the actual extracted frame count. Single
+model requests use the running vLLM tokenizer to reserve the complete output
+budget; if necessary, only analysis-image previews are resized, preserving all
+source text and images. The GPU configuration, context size, models, output
+resolution, caption style and requested durations are unchanged. No native
+Vision CPU fallback was added. The selector receives duration constraints on
+its first attempt and can retry measured valid windows for complete narrated
+topics as well as physical events. Only prior technical planning failures are
+eligible for the versioned retry; genuine critic rejections remain rejected.
+
+Actual source checks: the final-frame region batch passes. Both previously failed
+vision requests now return complete structured results: 6,443 input tokens with
+1,400 reserved in 58.27s, and 6,112 input tokens with 1,400 reserved in 24.92s
+(one analysis-image resize round). These are scoped recovery checks, not proof
+that the full collection has qualified. 105 application tests, 23 training-data
+checks and 12 JavaScript tests pass locally.

@@ -10,6 +10,25 @@ from cutroom.contracts import REVIEW_WEIGHTS
 
 
 class EfficiencyTests(unittest.TestCase):
+    def test_fractional_container_end_never_requests_a_nonexistent_vision_frame(self):
+        with tempfile.TemporaryDirectory() as name:
+            folder=Path(name);frames=folder/'frames';frames.mkdir()
+            for i in range(200):(frames/f'frame-{i+1:06}.jpg').touch()
+            index={'duration':200.434,'blocks':[{'start':0,'end':200.434,'regions':[]}]}
+            def regions(studio,job,paths,out):
+                self.assertTrue(all(path.is_file() for path in paths))
+                return [{'faces':[],'texts':[]} for _ in paths]
+            with patch.object(analysis,'native_regions',side_effect=regions) as detect:
+                analysis.densify_regions(None,{},folder,{'id':'last','start':180,'end':200.434},index)
+            self.assertGreater(detect.call_count,0)
+            self.assertEqual(max(r['at'] for r in index['blocks'][0]['regions']),199)
+            self.assertFalse((frames/'frame-000201.jpg').exists())
+
+    def test_missing_frame_is_reported_before_invoking_vision(self):
+        with tempfile.TemporaryDirectory() as name:
+            with self.assertRaisesRegex(RuntimeError,'source frame is missing'):
+                analysis.source_frames(None,{},None,Path(name),[0],1.4)
+
     def test_visual_editor_receives_source_storyboard_motion_and_separate_style_reference(self):
         with tempfile.TemporaryDirectory() as name:
             folder=Path(name);frames=folder/'frames';frames.mkdir()

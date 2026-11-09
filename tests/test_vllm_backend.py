@@ -9,6 +9,41 @@ from cutroom import runtime, vllm_backend as backend
 
 
 class NativeBackendTests(unittest.TestCase):
+    def test_context_budget_reserves_output_and_keeps_all_source_images(self):
+        from PIL import Image
+        import base64
+        class Response(io.BytesIO):
+            def __enter__(self):return self
+            def __exit__(self,*args):self.close()
+        counts=[8090,6400]
+        def tokenize(request,**kwargs):
+            value=json.loads(request.data)
+            self.assertEqual(value['chat_template_kwargs'],{'enable_thinking':False})
+            self.assertEqual(value['messages'][1]['content'][0]['text'],'all original source evidence')
+            return Response(json.dumps({'count':counts.pop(0),'max_model_len':8192}).encode())
+        with tempfile.TemporaryDirectory() as name:
+            image=Path(name)/'sheet.jpg';Image.new('RGB',(800,400)).save(image)
+            body=backend.payload(runtime.VISION_MODEL,'system','all original source evidence',{'type':'object'},[image,image],1400)
+            original=image.read_bytes()
+            with patch.object(backend.urllib.request,'urlopen',side_effect=tokenize):budget=backend.fit_context(body)
+            self.assertEqual(budget['image_resize_rounds'],1)
+            self.assertLessEqual(budget['prompt_tokens']+budget['reserved_output_tokens']+32,8192)
+            self.assertEqual(body['max_tokens'],1400)
+            self.assertEqual(len(body['messages'][1]['content']),3)
+            self.assertEqual(image.read_bytes(),original)
+            encoded=body['messages'][1]['content'][1]['image_url']['url'].split(',',1)[1]
+            with Image.open(io.BytesIO(base64.b64decode(encoded))) as resized:self.assertEqual(resized.size,(640,320))
+
+    def test_oversized_text_is_not_silently_truncated(self):
+        class Response(io.BytesIO):
+            def __enter__(self):return self
+            def __exit__(self,*args):self.close()
+        body=backend.payload(runtime.DIRECTORS[0],'system','source evidence',{'type':'object'},None,1400)
+        with patch.object(backend.urllib.request,'urlopen',return_value=Response(b'{"count":8090,"max_model_len":8192}')):
+            with self.assertRaisesRegex(RuntimeError,'response tokens'):
+                backend.fit_context(body)
+        self.assertEqual(body['messages'][1]['content'],'source evidence')
+
     def test_schema_incompatibility_is_caught_before_loading_a_large_model(self):
         schema={'type':'object','properties':{'question':{'type':'string','pattern':'.*[?]$','maxLength':60}}}
         with patch.object(backend,'ensure_model') as load:

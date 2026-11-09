@@ -190,8 +190,10 @@ def recover_invalid_plans(states):
 def failure_summary(states):
     unfinished = sum(s.get('status') in {'review_error','task_error'} for s in states.values())
     if unfinished:
-        return {'stage':'review','unfinished_reviews':unfinished,
-                'message':f'{unfinished} clip tasks did not finish. Their completed checkpoints and any rendered drafts are saved. '
+        rendered=any(s.get('revisions') for s in states.values())
+        detail='Their rendered drafts and completed checkpoints are saved.' if rendered else 'They failed before rendering; no videos reached quality review. The source and analysis are saved.'
+        return {'stage':'review' if rendered else 'planning','unfinished_reviews':unfinished,
+                'message':f'{unfinished} clip tasks did not finish. {detail} '
                           'Resume run retries the unfinished tasks. Other rejected edits remain in the editing report.'}
     planned = sum(bool(s.get('revisions')) for s in states.values())
     invalid = [s for s in states.values() if s.get('error') and not s.get('revisions')]
