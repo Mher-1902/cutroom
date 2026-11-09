@@ -206,7 +206,18 @@ def ensure_model(model, cancelled=lambda: False):
         raise RuntimeError("vLLM startup timed out. Check data/vllm.log; no alternative server was used.")
 
 
+def validate_schema_features(value):
+    """Reject a known pinned-backend incompatibility before loading any model."""
+    if isinstance(value,dict):
+        if value.get('type')=='string' and ('pattern' in value or 'format' in value) and ('minLength' in value or 'maxLength' in value):
+            raise ValueError('This vLLM schema must express string length inside its pattern, rather than mixing pattern and length constraints.')
+        for item in value.values():validate_schema_features(item)
+    elif isinstance(value,list):
+        for item in value:validate_schema_features(item)
+
+
 def payload(model, system, prompt, schema, images, predict):
+    validate_schema_features(schema)
     if model not in MODELS:
         raise ValueError("Choose an approved local MLX model.")
     if images and not MODELS[model]["vision"]:
@@ -271,4 +282,4 @@ def stream(body, cancelled, register, unregister):
     try:
         return json.loads("".join(pieces)), usage
     except ValueError as exc:
-        raise RuntimeError("vLLM returned incomplete JSON. Resume this stage to retry.") from exc
+        raise IncompleteResponse("vLLM returned incomplete JSON. Resume this stage to retry.", ''.join(pieces), usage) from exc

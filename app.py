@@ -62,6 +62,9 @@ class Handler(BaseHTTPRequestHandler):
                 STUDIO.get(ident)
                 from cutroom.task_store import TaskStore
                 self.json_response({'tasks':TaskStore.snapshot(STUDIO.jobs_dir/ident)})
+            elif re.fullmatch(r'/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/editor',path):
+                parts=path.split('/')
+                self.json_response(STUDIO.editor(parts[3],parts[5]))
             elif path.startswith("/api/jobs/"):
                 self.json_response(STUDIO.get(path.split("/")[-1]))
             elif path.startswith("/files/"):
@@ -122,6 +125,9 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/refine",path):
                 parts=path.split("/")
                 self.json_response(STUDIO.refine(parts[3],parts[5],raw.get("notes","")))
+            elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/style",path):
+                parts=path.split('/')
+                self.json_response(STUDIO.restyle(parts[3],parts[5],raw))
             else:
                 self.json_response({"error": "Not found"}, 404)
         except (ValueError, TypeError, KeyError) as exc:

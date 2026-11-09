@@ -88,3 +88,47 @@ Real GTA visual-brief test: **44.24 seconds total**, four images, 3,930 prompt t
 The previous GTA run was cancelled with its renders and checkpoints retained after the user requested a different direction. A fresh **three-clip, 60–90-second** run uses the hype brief. Source fingerprint/language validation allowed reuse of all **1,608 source frames**, audio, transcription and full-video analysis, while selecting new candidates and plans. The editing journal confirms reuse and fresh selection. This is a warm run and cannot establish cold-start completion timing. Full automatic production acceptance remains pending.
 
 69 application tests and eight JavaScript tests pass. Main remains unchanged pending the required automatic production and export acceptance checks.
+
+## 9 November: long sources, measured planning and revised captions
+
+100 application tests, 23 training-data guard tests and 12 JavaScript tests pass.
+Regressions cover the strict >3h automatic boundary, 20 scouts for ten hours,
+independent failure/retry/resume, CPU/thermal pauses, complete source mapping,
+large resumable uploads, 159-character Unicode post text and all eight story
+stages for 15–180-second edits. A generated ten-hour container was probed and
+sparsely sought; it is a container/timeline test, not ten-hour AI production.
+
+A prior automatic GTA run completed from cached full-source analysis: two
+71/100 exports from three requested, 89.61s and 89.94s, in 118 minutes. Its
+copy and planning latency were weak. The corrected director now splits bounded
+event selection, story copy and finishing intent; each copy receives evidence
+only from its retained event and stage. It cannot combine another challenge's
+prize/outcome. The installed xgrammar backend rejected combined string pattern
+and length constraints; request validation now catches that incompatibility
+before model loading, while Python validates the eight-beat copy with a bounded
+copy-only retry. Invalid/incomplete model responses still cannot qualify.
+
+A hierarchical scout/direct/render/review test used the real MrBeast reference
+between 1160–1347 seconds, with cached source speech/analysis. The director
+selected a complete basketball event at 1249.388–1328.908 seconds. Its 79.52s
+1080×1920 export passed both critics at 85/100 and technical checks. Peak model
+physical footprint was 13,530,034,536 bytes, additional swap 0, thermal state
+nominal. This establishes this scoped real-footage path, not full-source
+automatic long-stream selection or a cold-start benchmark.
+
+The user rejected the old video typography. Public Klap creation examples and
+documentation informed a replacement: wider bundled type, small phrase groups,
+selective active-word color and restrained opening/loop graphics. The user
+approved **bold with green highlights** as the default. A browser-tested saved
+clip editor now changes presets, font/size/color, positions, animation, opening
+title, caption words and framing without an LLM request. The actual UI revision
+rendered in 25.67s using VideoToolbox; 1080×1920, 79.52s, −14.61 LUFS, −5.32 dBTP.
+Four word corrections kept output timestamps, two earlier exports remain, and
+the updated ZIP passed integrity checks with 15 members. Its displayed score is
+explicitly the previous AI-reviewed score; the changed style needs user preview.
+
+Remaining acceptance limits: a complete new ten-hour source run and its timing,
+all short-length presets in actual AI production, dedicated active-speaker
+tracking, multilingual visual font coverage, and private reference selection
+recall are not claimed verified. CI checks run on Linux/macOS and compile native
+Mac helpers. Source packaging runs only after successful main checks.

@@ -157,7 +157,7 @@ def semantic_retrieval(studio,job,folder,segments):
     """Small CPU helper, released before the large vision model is loaded."""
     if not segments:return []
     target=folder/'retrieval.json'
-    digest=hashlib.sha256(json.dumps(segments,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    digest=hashlib.sha256(json.dumps([{k:s[k] for k in ('start','end','text')} for s in segments],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     if target.exists():
         saved=json.loads(target.read_text())
         if saved.get('input_digest')==digest:return saved.get('passages',[])
@@ -247,7 +247,8 @@ def build_index(studio,job,source,folder,metadata,segments,language):
         studio.check_cancel(job['id'])
         studio.event(job,f"Scout {i+1}/{len(chunks)}: source {chunk['start']/3600:.2f}–{chunk['end']/3600:.2f} hours. One shared video model.")
         try:
-            digest=hashlib.sha256(json.dumps([s for s in segments if s['end']>chunk['context_start'] and s['start']<chunk['context_end']],
+            digest=hashlib.sha256(json.dumps([{k:s[k] for k in ('start','end','text')} for s in segments
+                                             if s['end']>chunk['context_start'] and s['start']<chunk['context_end']],
                                             sort_keys=True,ensure_ascii=False).encode()).hexdigest()
             saved=tasks.get(chunk['id'])
             if saved['status']=='complete' and saved['result'].get('evidence_digest')!=digest:
@@ -344,13 +345,15 @@ def propose(studio,job,index,folder):
 
 def verified_speech(studio,job,source,folder,segments,candidate,metadata,language):
     """Replace discovery captions with actual selected audio before final decisions."""
-    start,end=max(0,candidate['start']-8),min(metadata['duration'],candidate['end']+8)
+    start=max(0,math.floor((candidate['start']-8)/5)*5)
+    end=min(metadata['duration'],math.ceil((candidate['end']+8)/5)*5)
     tasks=store(job,source,folder)
-    ident=f"verify-{candidate['id']}"
+    key=hashlib.sha256(json.dumps([start,end,language]).encode()).hexdigest()[:32]
+    ident=f"verify-{key}"
     runtime.unload()
     studio.event(job,'Checking the selected event against its actual source audio before directing the edit.')
     result=tasks.run(studio,job,ident,'excerpt_transcription',
-        lambda:transcribe_excerpt(studio,job,source,folder/'verified-speech'/candidate['id'],start,end,language)
+        lambda:transcribe_excerpt(studio,job,source,folder/'verified-speech'/key,start,end,language)
             if metadata['has_audio'] else {'segments':[],'language':language})
     # Keep distant discovery text; never caption the selected output with it.
     segments[:]=sorted([s for s in segments if s['end']<=start or s['start']>=end]+result['segments'],key=lambda s:s['start'])

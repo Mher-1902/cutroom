@@ -114,10 +114,12 @@ class Studio:
         if version not in {1, 2}:
             raise ValueError("Unknown pipeline version")
         if version == 2:
+            from .caption_styles import settings as caption_settings
+            config['caption_settings']=caption_settings(raw.get('caption_settings'))
             chosen = runtime.profile(self.data)
             config.update(model=chosen["director"], judge_model=runtime.VISION_MODEL,
                           content_mode=raw.get("content_mode", "auto"), editing_style="adaptive", quality_profile="quality",
-                          video_encoder="auto")
+                          video_encoder="auto",story_structure_version=1)
             config["source_origin"]=raw.get("source_origin","unknown")
             if config["source_origin"] not in {"own_original","licensed","third_party","unknown"}:
                 raise ValueError("Unknown source provenance")
@@ -235,7 +237,12 @@ class Studio:
                 from .resources import ResourcePause, Governor
                 while True:
                     try:
-                        if job.get('pending_refine'):
+                        if job.get('pending_style'):
+                            from .clip_style import restyle
+                            if job.get('processing_strategy',{}).get('mode')=='long_stream' and ident not in self.governors:
+                                self.governors[ident]=Governor(self,job)
+                            restyle(self,job)
+                        elif job.get('pending_refine'):
                             from .pipeline_v2 import refine
                             if job.get('processing_strategy',{}).get('mode')=='long_stream' and ident not in self.governors:
                                 self.governors[ident]=Governor(self,job)
@@ -280,6 +287,7 @@ class Studio:
             if not runtime.health(self.data)["ready"]:
                 raise ValueError("Finish the vLLM Metal setup before resuming generation. Saved progress is preserved.")
             self.cancel_flags[ident] = threading.Event()
+            job['config']['story_structure_version']=1
             self.update(job,status="queued",stage="Queued to resume",error=None,failure_summary=None)
             self.queue.put(ident)
             return deepcopy(job)
@@ -297,8 +305,29 @@ class Studio:
             if not notes:
                 raise ValueError("Describe the change you want.")
             job["pending_refine"]={"clip_id":clip_id,"notes":notes}
+            job['config']['story_structure_version']=1
             self.cancel_flags[ident]=threading.Event()
             self.update(job,status="queued",stage="Queued to refine",error=None)
+            self.queue.put(ident)
+            return deepcopy(job)
+
+    def editor(self,ident,clip_id):
+        from .clip_style import editor
+        return editor(self,self.get(ident),clip_id)
+
+    def restyle(self,ident,clip_id,raw):
+        from .clip_style import validate_request
+        with self.lock:
+            job=self.jobs.get(ident)
+            if not job or job.get('pipeline_version')!=2 or job['status'] in {'running','queued'}:
+                raise ValueError('Open a saved v2 collection to change its style.')
+            clip=next((c for c in job['clips'] if c['id']==clip_id),None)
+            if not clip:
+                raise ValueError('Clip not found.')
+            request=validate_request(self,job,clip,raw)
+            job['pending_style']={'clip_id':clip_id,**request}
+            self.cancel_flags[ident]=threading.Event()
+            self.update(job,status='queued',stage='Queued to render new style',error=None,progress=0)
             self.queue.put(ident)
             return deepcopy(job)
 

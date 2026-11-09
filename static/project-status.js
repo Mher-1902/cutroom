@@ -12,7 +12,7 @@ const CutroomProjectStatus = (() => {
       stage: 'Queued', progressLabel: 'Queued',
       detail: active ? `Waiting for “${active.name}” to finish. Its current stage: ${active.stage}. Your project has not started yet.` : 'Your project is queued. It will start when the worker is available.'
     };
-    if (job.status === 'running' && health.gpu_waiting) return {
+    if (job.status === 'running' && health.gpu_waiting && !job.pending_style) return {
       stage: 'Waiting for available model memory', progressLabel: 'Waiting',
       detail: 'Another local model server is still loaded. Progress is saved; processing continues when it closes. Stop & save progress cancels the wait.'
     };

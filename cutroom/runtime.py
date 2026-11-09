@@ -128,10 +128,10 @@ def chat(model, system, prompt, schema, images=None, cancelled=lambda: False, ke
     with inference_lock:
         if cancelled():
             raise RuntimeError("Cancelled")
+        body = vllm_backend.payload(model, system, prompt, schema, images, predict)
         started = time.time()
         vllm_backend.ensure_model(model, cancelled)
         loaded = time.time()
-        body = vllm_backend.payload(model, system, prompt, schema, images, predict)
         def register(response):
             with _active_lock:
                 if key:
@@ -166,6 +166,7 @@ def chat_batch(model, system, requests, cancelled=lambda:False, key=None, metric
     """
     if not vllm_backend.MODELS[model]['vision'] or not 1<=len(requests)<=2:
         raise ValueError('Only one or two requests for the same vision model can be batched.')
+    for request in requests:vllm_backend.validate_schema_features(request['schema'])
     with inference_lock:
         vllm_backend.ensure_model(model,cancelled)
         def run(index,request):

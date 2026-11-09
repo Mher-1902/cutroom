@@ -80,7 +80,14 @@ def make_ass(plan, segments, index, style="kinetic",watermark=None):
         style=plan.get('caption_style','kinetic')
     mapped = remap_words(segments, plan)
     suppressed = source_caption_intervals(index, plan)
-    margin = 970 if plan.get("caption_position") == "upper" else 410
+    if plan.get('caption_settings') or (watermark or {}).get('caption_settings'):
+        from . import caption_styles
+        mapped=caption_styles.corrections(mapped,plan.get('caption_edits',{}))
+        visible=plan.get('caption_enabled',style!='none')
+        return caption_styles.make_ass(plan,mapped,suppressed,watermark or {},'auto' if visible else 'none'),mapped,len(suppressed)
+    # Keep captions out of the source action and the upper story graphics.
+    upper=plan.get('caption_position')=='upper' and plan.get('layout')!='fit'
+    margin = 1320 if upper else 410
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -89,7 +96,7 @@ WrapStyle: 0
 ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Captions,Barlow Condensed,84,&H00FFFFFF,&H00FFFFFF,&H00120A0D,&H70120914,-1,0,0,0,100,100,0,0,1,5,2,2,100,100,{margin},1
+Style: Captions,Barlow Condensed,84,&H00FFFFFF,&H00FFFFFF,&H20120A0D,&H70120914,-1,0,0,0,100,100,0,0,3,10,0,2,100,100,{margin},1
 Style: Hook,Anton,76,&H00D6F1FF,&H00D6F1FF,&H00190B13,&H70190B13,0,0,0,0,100,100,1,0,3,12,0,8,100,100,240,1
 Style: Callout,Anton,69,&H00A68BF0,&H00A68BF0,&H00190B13,&H70190B13,0,0,0,0,100,100,1,0,1,4,2,8,100,100,330,1
 [Events]
@@ -101,9 +108,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             start, end = max(0, group[0]["start"]), min(plan["duration"], group[-1]["end"])
             if end <= start or any(max(start, a) < min(end, b) for a,b in suppressed):
                 continue
+            occupied=any(max(start,o['at'])<min(end,o['at']+o['duration']) for o in plan['overlays'])
+            lane='{\\an2\\pos(540,1510)}' if upper and occupied else ''
             if style == "clean" or len(group) == 1:
                 text = " ".join(core.ass_escape(w["text"]) for w in group)
-                events.append(f"Dialogue: 0,{core.ass_time(start)},{core.ass_time(end)},Captions,,0,0,0,,{{\\fad(55,55)}}{text}")
+                events.append(f"Dialogue: 0,{core.ass_time(start)},{core.ass_time(end)},Captions,,0,0,0,,{lane}{{\\fad(55,55)}}{text}")
             else:
                 for i, word in enumerate(group):
                     a = max(start, word["start"])
@@ -112,7 +121,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         continue
                     text = " ".join(("{\\c&HA68BF0&}" if j == i else "{\\c&HFFFFFF&}") + core.ass_escape(w["text"]) for j,w in enumerate(group))
                     animate = "{\\fscx96\\fscy96\\t(0,85,\\fscx100\\fscy100)}" if i == 0 else ""
-                    events.append(f"Dialogue: 0,{core.ass_time(a)},{core.ass_time(b)},Captions,,0,0,0,,{animate}{text}")
+                    events.append(f"Dialogue: 0,{core.ass_time(a)},{core.ass_time(b)},Captions,,0,0,0,,{lane}{animate}{text}")
     for overlay in plan["overlays"]:
         hype=plan.get('screen_hook',{}).get('style')=='hype' and overlay['kind']!='label'
         size=(122 if overlay['kind']=='hook' else 94) if hype else (76 if overlay['kind']=='hook' else 69)
@@ -218,8 +227,9 @@ def layout_filter(label, out, plan, width, height, index, span, metadata):
                         f"[{stem}game]crop=iw:ih*{game_h:.5f}:0:ih*{game_y:.5f},scale={width}:{height-top}:force_original_aspect_ratio=decrease,pad={width}:{height-top}:(ow-iw)/2:(oh-ih)/2:color=0x190b13,setsar=1[{stem}bottom];"
                         f"[{stem}top][{stem}bottom]vstack=inputs=2{out}")
     stem = out.strip("[]")
+    backdrop="brightness=-.24:saturation=.65" if plan.get('caption_settings') else "brightness=-.12"
     return (f"{label}split=2[{stem}bg][{stem}fg];"
-            f"[{stem}bg]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},boxblur=24:2,eq=brightness=-.12[{stem}back];"
+            f"[{stem}bg]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},boxblur=24:2,eq={backdrop}[{stem}back];"
             f"[{stem}fg]scale={width}:{height}:force_original_aspect_ratio=decrease[{stem}front];"
             f"[{stem}back][{stem}front]overlay=(W-w)/2:(H-h)/2,setsar=1{out}")
 

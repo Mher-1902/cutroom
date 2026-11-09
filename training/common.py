@@ -175,11 +175,13 @@ def validate_output(example, source, output):
                 "Plan must honor the explicit input caption style")
         strategy = output["editing_strategy"]
         strategy_schema = schema["properties"]["editing_strategy"]
-        require(isinstance(strategy, dict) and set(strategy) == set(strategy_schema["required"]),
-                "editing_strategy needs exactly content_type, pacing, reason")
+        require(isinstance(strategy, dict) and set(strategy_schema["required"]) <= set(strategy) <= set(strategy_schema['properties']),
+                "editing_strategy needs content_type, pacing, reason, with an optional supported tone")
         for field in ("content_type", "pacing"):
             require(strategy[field] in strategy_schema["properties"][field]["enum"],
                     f"Invalid editing_strategy.{field}")
+        if 'tone' in strategy:
+            require(strategy['tone'] in strategy_schema['properties']['tone']['enum'],'Invalid editing_strategy.tone')
         text(strategy["reason"], "editing_strategy.reason")
         require(len(strategy["reason"]) <= 700, "editing_strategy.reason would be truncated")
         for key in ("title", "reason"):

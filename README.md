@@ -62,6 +62,13 @@ stay below 160 characters. See [long-stream behavior and limits](docs/long-strea
 
 Each project shows real stages and an editing journal. Qualified clips have playable previews, critic explanations, scores, individual MP4/SRT/ASS downloads and optional refinement notes. Refinement retains previous exports; a failed revision does not replace the last qualified clip. New generations have separate files and review records.
 
+**Style & captions** changes a saved clip without repeating AI analysis. Choose
+Focus (bold/green), Clean (minimal) or Punch (bold/yellow), adjust type/color/size,
+correct subtitle words, edit the opening title and change framing. Save a style
+locally for reuse. A changed export retains previous versions and receives new
+technical checks; its prior AI score is labeled as belonging to the earlier edit.
+See the [public Klap feature comparison and measured style revision](docs/creation-benchmark.md).
+
 The collection ZIP contains MP4s, covers, subtitles, editable captions, suggested post text, edit plans, the critic/technical report and finishing-asset license information. Detailed source index, candidate decisions, rejected drafts and model timings remain in the project folder for inspection. All this is local; nothing posts automatically to social accounts.
 
 Audio extraction and MP4 renders are committed atomically. Interrupted outputs do not count as finished checkpoints. Model downloads retain completed ranges. Cancellation saves completed work; after closing or restarting the app, use **Your projects → Resume run**. Previous v1 projects remain readable and keep their existing files and settings.
@@ -80,7 +87,7 @@ The Mac is an Apple M5 with 10 CPU cores, 10 GPU cores and 24 GiB unified memory
 
 The approved 71.72-second portrait style preview passed technical checks. The same 1080×1920 edit encoded in 14.4 seconds with VideoToolbox versus 45.9 seconds with libx264; frame comparison averaged 0.9961 SSIM. Hardware encoding activates only with a verified local renderer profile and falls back to CPU if encoding fails.
 
-The complete autonomous real-footage run is still being validated. The old four-hour analysis projection came from 300 serial 12-second windows per source hour. The new broad map uses 60 windows per hour, with additional inspection on selected events. Do not reuse the old estimate as the new runtime's measured completion time. See [inference measurements](docs/inference-efficiency.md) and [acceptance status](VERIFICATION.md). Under one hour is a target, not a measured guarantee; downloads, selected clip count and revision rounds matter.
+An automatic GTA run using cached full-source analysis completed with two qualifying clips from three requested in 118 minutes. That earlier run exposed weak copy and costly large planning/review calls; it is not a benchmark of the newer measured-event planner or long-stream scouts. The corrected planner passed a real-reference excerpt test, followed by the user-approved caption revision. Full ten-hour production timing remains unmeasured. The old four-hour analysis projection came from 300 serial 12-second windows per source hour; it is not the current runtime's measured completion time. See [inference measurements](docs/inference-efficiency.md) and [acceptance status](VERIFICATION.md). Under one hour is a target, not a guarantee; downloads, clip count and revision rounds matter.
 
 The previous v1 pipeline passed a synthetic narration demonstration. Current source checks cover timestamp mapping, replays, speed changes, framing, adaptive styles, source captions, imports, checkpointing, launch identity and audio-clock recovery. These checks and manually selected previews are not substitutes for a completed AI production run.
 

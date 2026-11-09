@@ -6,19 +6,24 @@ LABELS=('Hook','Lead','Body 1','Open loop 1','Body 2','Open loop 2','Body 3','CT
 BRIEF_SCHEMA={'type':'object','properties':{key:{'type':'string','minLength':1,'maxLength':75} for key in STAGES},
               'required':list(STAGES)}
 for _key in ('open_loop_1','open_loop_2','cta'):
-    BRIEF_SCHEMA['properties'][_key].update(minLength=4,maxLength=60,pattern='.*[?？؟]$')
+    # Simple bounded strings are reliable on the pinned Metal backend. Question
+    # punctuation is validated in Python and repaired in a small copy-only call.
+    BRIEF_SCHEMA['properties'][_key]={'type':'string','minLength':4,'maxLength':60}
 DIRECTIVE=(
     'EVERY short must follow these eight beats in order: Hook, Lead, Body 1, Open loop 1, '
     'Body 2, Open loop 2, Body 3, CTA. Fill story_brief with specific source-grounded intent for EACH beat. '
     'Hook raises curiosity; Lead establishes context; Body 1 develops it; Open loop 1 raises a NEW '
     'specific question answered in Body 2; Open loop 2 raises a further question answered in Body 3; '
     'Both loops must advance DIFFERENT uncertainties, not paraphrase the hook or each other. '
+    'The first loop asks about a SMALL intermediate development actually resolved in Body 2 '
+    '(for example whether the first shot lands), not the overall winner when the contest is still ongoing. '
     'Body 3 earns the final payoff; CTA invites a new relevant viewer reaction or action, '
     'not a question whose answer the viewer has just seen. '
     'Do not invent a missing payoff. Lead and body text are internal edit intentions, not section labels '
     'to display. Hook, both open-loop questions and CTA appear as concise on-screen text; keep each '
     'under 10 words and in the source language. The compiler allocates Hook to the first min(3 seconds,10%); '
-    'Lead to 16%; Body 1 to 34%; Open loop 1 to 43%; Body 2 to 61%; Open loop 2 to 70%; '
+    'Lead ends at 16%; Body 1 ends at 34%; each open-loop transition lasts at most 2.4 seconds; '
+    'Body 2 ends at 61%, followed immediately by the second short loop and Body 3. '
     'Body 3 to the last 1.5–3 seconds; then CTA. Choose footage whose actual progression fits these '
     'beats, including very short edits. Questions must be answered AFTER their loop appears. '
     'Write EVERY brief as a complete clause of 3–8 words, not a long sentence cut off at the character limit. '
@@ -29,8 +34,9 @@ DIRECTIVE=(
 
 
 def beat_boundaries(duration):
-    return [0,min(3,duration*.1),duration*.16,duration*.34,duration*.43,
-            duration*.61,duration*.70,duration-min(3,duration*.1),duration]
+    transition=min(2.4,duration*.08)
+    return [0,min(3,duration*.1),duration*.16,duration*.34,duration*.34+transition,
+            duration*.61,duration*.61+transition,duration-min(3,duration*.1),duration]
 
 
 def source_sections(plan,start,end):
@@ -44,13 +50,20 @@ def source_sections(plan,start,end):
     return result
 
 
-def compile_story(plan,brief):
+def validate_brief(brief):
     brief=deepcopy(brief)
     if set(brief)!=set(STAGES):raise ValueError('Every short needs all eight story beats in order.')
     for key in STAGES:
         if not isinstance(brief[key],str) or not 0<len(brief[key].strip())<=75:
             raise ValueError(f'Invalid {key} story beat; use 1–75 characters.')
         brief[key]=brief[key].strip()
+        if key in {'open_loop_1','open_loop_2','cta'} and (len(brief[key])>60 or brief[key][-1] not in '?？؟'):
+            raise ValueError(f'{key} needs a concise viewer question ending in a question mark.')
+    return brief
+
+
+def compile_story(plan,brief):
+    brief=validate_brief(brief)
     duration=plan['duration']
     boundaries=beat_boundaries(duration)
     beats=[]
@@ -65,6 +78,9 @@ def compile_story(plan,brief):
             overlays.append({'at':beat['start'],'duration':min(3,beat['end']-beat['start']),
                              'text':beat['intent'],'kind':'hook' if beat['key']=='hook' else 'callout',
                              'story_role':beat['key']})
+    required=[o for o in overlays if o.get('story_role')]
+    overlays=[o for o in overlays if o.get('story_role') or
+              not any(max(o['at'],r['at'])<min(o['at']+o['duration'],r['at']+r['duration']) for r in required)]
     plan['overlays']=sorted(overlays,key=lambda o:o['at'])
     plan['screen_hook']={**plan.get('screen_hook',{}),'enabled':True,'text':brief['hook'],
                          'style':plan.get('screen_hook',{}).get('style','clean')}

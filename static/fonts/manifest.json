@@ -115,6 +115,47 @@
       "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/barlowcondensed/BarlowCondensed-ExtraBold.ttf",
       "sha256": "724c9c25952d5f4a2d87185d9767aa006144c5f0d944dc05bf7d5d603551c260",
       "purpose": "Flat fontsdir for FFmpeg/libass"
+    },
+    {
+      "family": "Cutroom Sans",
+      "path": "captions/CutroomSans-ExtraBold.ttf",
+      "kind": "font",
+      "license": "OFL-1.1",
+      "derived_from": "montserrat/Montserrat-Variable.ttf",
+      "axes": {
+        "wght": 800
+      },
+      "sha256": "8ee3482b0c6b769fbb81224ee3e84190867e27513baea1fe65e24926cc798c13",
+      "purpose": "Renamed static OFL instance for reliable FFmpeg/libass and browser preview"
+    },
+    {
+      "family": "Cutroom Studio",
+      "path": "captions/CutroomStudio-Bold.ttf",
+      "kind": "font",
+      "license": "OFL-1.1",
+      "derived_from": "instrumentsans/InstrumentSans-Variable.ttf",
+      "axes": {
+        "wght": 700,
+        "wdth": 100
+      },
+      "sha256": "b291b453b3669acfb319d6d7af9fe63f875c43612d3ed081f8454281e2436d3e",
+      "purpose": "Renamed static OFL instance for reliable FFmpeg/libass and browser preview"
+    },
+    {
+      "family": "montserrat",
+      "path": "montserrat/Montserrat-Variable.ttf",
+      "kind": "font",
+      "license": "OFL-1.1",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf",
+      "sha256": "0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7"
+    },
+    {
+      "family": "montserrat",
+      "path": "montserrat/OFL.txt",
+      "kind": "license",
+      "license": "OFL-1.1",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/OFL.txt",
+      "sha256": "8b7141c03fa4f8d44e6345d5d4931709290f0f67875e452e95ac1fd3a027802e"
     }
   ]
 }

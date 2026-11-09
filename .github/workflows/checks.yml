@@ -35,6 +35,7 @@ jobs:
           python -m compileall -q app.py cutroom training tests
           node --check static/app.js
           node --check static/estimate.js
+          node --check static/caption-editor.js
           node --test tests/test_*.js
       - name: Compile native macOS helpers and desktop shell
         if: runner.os == 'macOS'

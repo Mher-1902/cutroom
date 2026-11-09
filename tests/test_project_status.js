@@ -44,3 +44,9 @@ test('resource cooldown is an automatic pause with saved progress',()=>{
  const view=status.describe(job,[job],{});
  assert.match(view.stage,/cooling/);assert.match(view.detail,/resumes/);
 });
+test('style-only rendering does not falsely wait for another LLM server',()=>{
+ const job={id:'style',status:'running',progress:75,stage:'Rendering style & captions',pending_style:{clip_id:'a'},events:[]};
+ const view=status.describe(job,[job],{gpu_waiting:true});
+ assert.equal(view.stage,'Rendering style & captions');
+ assert.equal(view.progressLabel,'75%');
+});

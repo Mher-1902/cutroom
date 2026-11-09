@@ -19,11 +19,25 @@ def calibration_text(index_duration, segments, attention_hint=0,visual=None):
                                    if a<=s['start']<s['end']<=b]},ensure_ascii=False,separators=(',',':'))
 
 
-def review_context(candidate,index,segments):
+def review_context(candidate,index,segments,plan=None):
+    left,right=(plan.get('start',candidate['start']),plan.get('end',candidate['end'])) if plan else (candidate['start'],candidate['end'])
+    visual=deepcopy(candidate.get('fine_evidence'))
+    if visual and plan:
+        # A candidate can straddle a scene transition. Do not condition the
+        # critic on a neighboring challenge's summary or supposed outcome.
+        visual.pop('summary',None)
+        visual['events']=[e for e in visual.get('events',[]) if left-8<=e['at']<=e['end']<=right+8]
+        visual['observations_may_be_wrong']=True
+        brief=visual.get('visual_brief',{})
+        brief['shot_suggestions']=[s for s in brief.get('shot_suggestions',[]) if left<=s.get('source_time',-1)<right]
+        brief['source_frame_ids']={key:at for key,at in brief.get('source_frame_ids',{}).items() if left<=at<right}
+        if not left<=brief.get('opening_source_time',-1)<right:
+            for key in ('opening_source_time','opening_frame_id','opening_why','suggested_hook'):brief.pop(key,None)
     return {"candidate":{k:candidate.get(k) for k in ("title","setup","payoff","reason","start","end")},
-            "close_visual_observations":candidate.get("fine_evidence"),
+            "proposal_is_unverified":True,"verified_source_interval":[left,right],
+            "close_visual_observations":visual,
             "neighboring_speech":[{k:s[k] for k in ("start","end","text")} for s in segments
-                                  if s["end"]>candidate["start"]-8 and s["start"]<candidate["end"]+8],
+                                  if s["end"]>left-8 and s["start"]<right+8],
             "source_mode":index["mode"]}
 
 
@@ -35,6 +49,7 @@ def combined_review(visual,story,technical):
             raise ValueError("The story critic returned an invalid score")
         metrics[key]=min(metrics[key],value) if key=="pacing" else value
     return {**visual,"metrics":metrics,"score":round(sum(metrics[k]*REVIEW_WEIGHTS[k] for k in metrics)*20),
+            "structure_passed":bool(visual.get('structure_passed',True) and story.get('structure_passed',True)),
             "reject":bool(visual["reject"] or story["reject"] or not technical["passed"] or
                           not visual.get('structure_passed',True) or not story.get('structure_passed',True)),
             "reason":str(story["reason"])[:900]+" "+str(visual["reason"])[:900],
@@ -107,7 +122,7 @@ def evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candi
         review['reject']=bool(review['reject'] or not technical['passed'])
     else:
         spoken=analysis.compact_speech(record['mapped'],0,plan['duration'])
-        context=review_context(candidate,index,original_segments)
+        context=review_context(candidate,index,original_segments,plan)
         visual_path=folder/(record['path'].stem+'.visual-review.json')
         story_path=folder/(record['path'].stem+'.story-review.json')
         if visual_path.exists():
@@ -427,8 +442,10 @@ def pipeline(studio,job):
             from .resources import ResourcePause
             if isinstance(exc,ResourcePause):raise
             if isinstance(exc,runtime.vllm_backend.IncompleteResponse):
-                state.update(status='review_error',error='The AI review did not finish after its automatic retry. The rendered draft is saved.')
-                studio.event(job,'A draft is saved for review recovery. Continuing with the next candidate.')
+                rendered=bool(state.get('revisions'))
+                state.update(status='review_error' if rendered else 'task_error',
+                    error='An AI response did not finish. Completed checkpoints'+(' and rendered drafts are saved.' if rendered else ' are saved.'))
+                studio.event(job,'This AI step is saved for recovery. Continuing with the next independent candidate.')
             elif str(exc).startswith("Director could not produce"):
                 state.update(status="rejected",error=str(exc))
                 studio.event(job,str(exc))

@@ -106,13 +106,13 @@ class TaskTests(unittest.TestCase):
                 self.assertLessEqual(b-a,300)
                 if a==5100:raise RuntimeError('one damaged section')
                 return {'segments':[{'start':a,'end':a+1,'text':'actual speech','words':[]}],'language':'en'}
-            with patch('cutroom.source_captions.discovery',return_value=None),patch.object(runtime_for_tests(),'unload'), \
+            with patch('cutroom.source_captions.discovery',return_value=None),patch.object(longform.runtime,'unload'), \
                  patch.object(longform,'transcribe_excerpt',side_effect=speech) as transcribe:
                 segments,_=longform.prepare_speech(studio,job,source,folder,{'duration':36000,'has_audio':True})
             self.assertEqual(transcribe.call_count,121);self.assertEqual(len(segments),119)
             self.assertEqual(job['failed_speech_chunks'],['speech-0017'])
             repaired={'segments':[{'start':5100,'end':5101,'text':'recovered speech','words':[]}],'language':'en'}
-            with patch('cutroom.source_captions.discovery',return_value=None),patch.object(runtime_for_tests(),'unload'), \
+            with patch('cutroom.source_captions.discovery',return_value=None),patch.object(longform.runtime,'unload'), \
                  patch.object(longform,'transcribe_excerpt',return_value=repaired) as transcribe:
                 segments,_=longform.prepare_speech(studio,job,source,folder,{'duration':36000,'has_audio':True})
             self.assertEqual(transcribe.call_count,1);self.assertEqual(len(segments),120)
@@ -220,6 +220,8 @@ class StoryTests(unittest.TestCase):
         self.assertEqual(caption('e\u0301'),'é')
         for value in ('a'*160,'😀'*160):
             with self.assertRaises(ValueError):caption(value)
+        from cutroom.post_copy import title
+        self.assertEqual(title(': LeBron challenge'),'LeBron challenge')
 
     def test_measured_editor_uses_only_real_window_and_beat_ids(self):
         with tempfile.TemporaryDirectory() as name:
@@ -244,7 +246,7 @@ class StoryTests(unittest.TestCase):
             root=Path(name);studio=Studio(root);(root/'test').mkdir()
             candidate={'id':'a'*32,'start':0,'end':180,'title':'unverified suggestion'}
             segments=[{'start':0,'end':5,'text':'EARLY_EVENT_CLAIM','words':[]},
-                      {'start':120,'end':125,'text':'LATER_EVENT_SETUP','words':[]},
+                      {'start':110,'end':115,'text':'LATER_EVENT_SETUP','words':[]},
                       {'start':170,'end':175,'text':'LATER_EVENT_PAYOFF','words':[]}]
             payload={'title':'A complete later event','hook':'What happens next?','post_caption':'A source-grounded teaser about the later event.',
                 'reason':'The later event resolves.','complete':True,'cold_open':False,'framing':'fit',
@@ -253,10 +255,13 @@ class StoryTests(unittest.TestCase):
                 'callouts':[],'punch_ins':[],'sound_cues':[],'story_brief':brief()}
             selected=[]
             def model(studio,job,system,prompt,schema,**options):
-                ids=schema['properties']['window_id']['enum']
-                if len(ids)>1:
+                if 'start_id' in schema['properties']:
+                    ids=schema['properties']['start_id']['enum'];selected.append('EVENT')
+                    return {'start_id':ids[1],'end_id':ids[-1],'complete':True,'reason':'A complete later event.'}
+                ids=schema['properties'].get('window_id',{}).get('enum')
+                if ids and len(ids)>1:
                     selected.append(ids[-1]);return {'window_id':ids[-1],'complete':True,'reason':'A complete later event.'}
-                self.assertEqual(ids,selected)
+                if ids:self.assertEqual(ids,selected)
                 self.assertNotIn('EARLY_EVENT_CLAIM',prompt)
                 self.assertIn('LATER_EVENT_PAYOFF',prompt)
                 return {**payload,'window_id':selected[0]}
@@ -264,6 +269,15 @@ class StoryTests(unittest.TestCase):
             with patch.object(director,'call',side_effect=model):
                 result=director.make_plan(studio,job,candidate,{'duration':36000,'mode':'story','blocks':[],'audio_events':[]},segments)
             self.assertGreaterEqual(result['start'],90)
+
+    def test_critic_context_excludes_a_neighboring_challenge(self):
+        candidate={'start':0,'end':180,'fine_evidence':{'summary':'Wrong neighboring outcome',
+                    'events':[{'at':10,'end':20,'description':'neighbor'},{'at':130,'end':140,'description':'retained'}]}}
+        speech=[{'start':10,'end':20,'text':'OTHER CHALLENGE'}, {'start':130,'end':140,'text':'ACTUAL CHALLENGE'}]
+        context=pipeline_v2.review_context(candidate,{'mode':'challenge'},speech,{'start':100,'end':180})
+        self.assertEqual([s['text'] for s in context['neighboring_speech']],['ACTUAL CHALLENGE'])
+        self.assertNotIn('summary',context['close_visual_observations'])
+        self.assertEqual(len(context['close_visual_observations']['events']),1)
 
 
 class UploadTests(unittest.TestCase):
@@ -321,7 +335,3 @@ class LongMediaTests(unittest.TestCase):
             self.assertEqual(len(list((folder/'sparse-frames').glob('*.jpg'))),3)
             self.assertEqual(job['processing_strategy']['scout_count'],20)
             self.assertFalse((folder/'frames').exists())
-
-
-def runtime_for_tests():
-    return longform.runtime

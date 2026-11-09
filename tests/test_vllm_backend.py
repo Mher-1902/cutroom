@@ -9,6 +9,15 @@ from cutroom import runtime, vllm_backend as backend
 
 
 class NativeBackendTests(unittest.TestCase):
+    def test_schema_incompatibility_is_caught_before_loading_a_large_model(self):
+        schema={'type':'object','properties':{'question':{'type':'string','pattern':'.*[?]$','maxLength':60}}}
+        with patch.object(backend,'ensure_model') as load:
+            with self.assertRaisesRegex(ValueError,'pattern'):
+                runtime.chat(runtime.DIRECTORS[0],'system','source',schema)
+            load.assert_not_called()
+        from cutroom.editor_contracts import PLAN_SCHEMA
+        backend.validate_schema_features(PLAN_SCHEMA)
+
     def test_structured_responses_cannot_add_unbounded_fields_or_whitespace(self):
         schema={'type':'object','properties':{'detail':{'type':'object','properties':{'score':{'type':'integer'}}}}}
         body=backend.payload(runtime.DIRECTORS[0],'system','source',schema,[],300)
