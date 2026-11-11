@@ -5,3 +5,10 @@ The repository contains application source, tests, documentation, original vecto
 Downloaded model weights, Python environments, cached source media, private settings, generated projects, and test-reference video frames are excluded from Git. Model publishers' licenses apply to weights acquired during setup. YouTube references in documentation are test inputs; their videos and creator images are not distributed here.
 
 Public source availability alone does not grant a separate license to the application code. No rights to other creators' videos, music embedded in a source, names, or likenesses are conveyed by this repository.
+
+Remotion is installed from npm and retains its own license:
+https://github.com/remotion-dev/remotion/blob/main/LICENSE.md.
+`remotion/src/elements/basic-captions.element.tsx` is the unchanged official
+Basic Captions element from https://www.remotion.dev/elements/captions/basic-captions/.
+The installed plugin's skill corpus is kept only in ignored local data. See
+docs/REMOTION.md.

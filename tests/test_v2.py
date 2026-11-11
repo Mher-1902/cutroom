@@ -178,6 +178,7 @@ class ImportTests(unittest.TestCase):
         from cutroom.engine import Studio
         with tempfile.TemporaryDirectory() as name:
             studio=Studio.__new__(Studio)
+            studio.root=Path(name)
             studio.data=Path(name);studio.jobs_dir=Path(name)/'jobs';studio.jobs_dir.mkdir()
             studio.setup_state={'running':False};studio.jobs={};studio.cancel_flags={}
             studio.lock=threading.RLock();studio.queue=queue.Queue()

@@ -244,11 +244,16 @@ def encoder_options(encoder,final,width,threads=6):
 
 
 def render(studio, job, source, plan, segments, index, metadata, folder, revision=0, final=False):
+    if job['config'].get('render_engine')=='remotion':
+        from .remotion_bridge import render as remotion_render
+        return remotion_render(studio,job,source,plan,segments,index,metadata,folder,revision,final)
     run = lambda args: studio.run(job, args)
     stem = f"c-{plan['id']}-r{revision}-{'final' if final else 'draft'}"
     target = folder / (stem + ".mp4")
     ass_path, srt_path = folder / (stem + ".ass"), folder / (stem + ".srt")
     ass, mapped, preserved = make_ass(plan, segments, index, job["config"].get("style", "kinetic"),job["config"])
+    if job['config'].get('_clean_graphics'):
+        ass=ass.split('[Events]')[0]+'[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'
     ass_path.write_text(ass)
     srt_path.write_text(srt(mapped))
     marker = folder / (stem + ".complete.json")

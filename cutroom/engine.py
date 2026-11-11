@@ -116,6 +116,15 @@ class Studio:
         if version == 2:
             from .caption_styles import settings as caption_settings
             config['caption_settings']=caption_settings(raw.get('caption_settings'))
+            from .highlights import PREFERENCES
+            config['moment_preference']=raw.get('moment_preference','auto')
+            if config['moment_preference'] not in PREFERENCES:raise ValueError('Unknown moment selection preference.')
+            from .remotion_bridge import available
+            config['render_engine']=raw.get('render_engine','remotion' if available(self.root) else 'ffmpeg')
+            if config['render_engine'] not in {'remotion','ffmpeg'}:
+                raise ValueError('Choose Remotion or Classic finishing.')
+            if config['render_engine']=='remotion' and not available(self.root):
+                raise ValueError('Install Remotion first: cd remotion && npm ci. Or choose Classic finishing.')
             chosen = runtime.profile(self.data)
             config.update(model=chosen["director"], judge_model=runtime.VISION_MODEL,
                           content_mode=raw.get("content_mode", "auto"), editing_style="adaptive", quality_profile="quality",
@@ -237,7 +246,10 @@ class Studio:
                 from .resources import ResourcePause, Governor
                 while True:
                     try:
-                        if job.get('pending_style'):
+                        if job.get('pending_remotion'):
+                            from .remotion_bridge import open_studio
+                            open_studio(self,job)
+                        elif job.get('pending_style'):
                             from .clip_style import restyle
                             if job.get('processing_strategy',{}).get('mode')=='long_stream' and ident not in self.governors:
                                 self.governors[ident]=Governor(self,job)
@@ -314,6 +326,18 @@ class Studio:
     def editor(self,ident,clip_id):
         from .clip_style import editor
         return editor(self,self.get(ident),clip_id)
+
+    def remotion(self,ident,clip_id):
+        with self.lock:
+            job=self.jobs.get(ident)
+            if not job or job.get('pipeline_version')!=2 or job['status'] in {'running','queued'}:
+                raise ValueError('Open a saved collection to prepare Remotion Studio.')
+            if not any(c['id']==clip_id for c in job['clips']):raise ValueError('Clip not found.')
+            job['pending_remotion']={'clip_id':clip_id}
+            self.cancel_flags[ident]=threading.Event()
+            self.update(job,status='queued',stage='Queued for Remotion Studio',error=None,progress=0)
+            self.queue.put(ident)
+            return deepcopy(job)
 
     def restyle(self,ident,clip_id,raw):
         from .clip_style import validate_request

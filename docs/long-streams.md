@@ -30,6 +30,41 @@ finalists receive dense inspection. Brief events between samples can be missed;
 this mode does not claim exhaustive frame-by-frame understanding. Failed scouts
 are marked unassessed and can be retried without repeating successful scouts.
 
+## Creator-highlight selection
+
+Automatic selection uses a separate creator-highlight path for completed live
+gameplay/reaction streams. Informative guides keep balanced selection. The
+advanced **Moment selection** control can override this choice.
+
+The highlight path scans the complete audio timeline with bounded FFmpeg
+half-second energy measurements, then proposes bursts distributed across the
+recording. Caption cues add proposals. A short-lived AudioSet classifier checks
+these excerpts on MPS/CUDA; it has no CPU inference fallback. These are mixed
+game/voice recordings, so sound scores propose inspection and never certify a
+human reaction. One large generative model is resident at a time.
+
+Up to forty proposals receive visual inspection on demand, before transcription,
+editing or rendering. Original-resolution camera crops enlarge the real creator;
+the inspector must distinguish that person from scripted game characters. Quiet
+dialogue, routine gameplay, menus and technical setup cannot qualify merely
+because they make a coherent story. Claimed laughter/screaming must agree with
+the corresponding sound evidence. Exceptional gameplay needs a visible unusual
+outcome. Source descriptions remain fallible and the final critics independently
+check the retained edit.
+
+The verified peak must remain audible in the main timeline, including after
+duration repairs and revisions. An initial split framing preserves the camera
+reaction when detected. The rendered critic also requires a separate source
+entertainment score of at least 4/5; typography, music and a high overall editorial
+score cannot compensate for ordinary source footage. This is a taste rubric,
+not a predicted view count or a guarantee of exciting results.
+
+Audio sections, classifications and individual verdicts are checkpointed. On
+resuming an older project in this mode, previous exports stay accessible under
+**Previous selection** and do not count toward the new qualification. Rejected
+proposals and concrete reasons remain in the editing report. Detection is
+targeted and can still miss moments; it does not watch every source frame.
+
 ## Eight-beat story contract
 
 Every newly directed edit includes, in order: **Hook → Lead → Body 1 → Open loop 1

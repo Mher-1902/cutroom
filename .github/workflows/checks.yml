@@ -39,6 +39,13 @@ jobs:
           node --check static/estimate.js
           node --check static/caption-editor.js
           node --test tests/test_*.js
+      - name: Remotion timeline and component checks
+        working-directory: remotion
+        run: |
+          npm ci
+          npx tsc --noEmit
+          node --check render.mjs
+          node --test tests/*.test.cjs
       - name: Compile native macOS helpers and desktop shell
         if: runner.os == 'macOS'
         run: |

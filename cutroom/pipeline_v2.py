@@ -8,6 +8,7 @@ import zipfile
 from . import analysis, core, director, render_v2, runtime, source_media, source_cache
 from .contracts import ClipEditPlan, DraftReview, REVIEW_WEIGHTS
 from .source_policy import strategy
+from . import highlights
 
 
 def calibration_text(index_duration, segments, attention_hint=0,visual=None):
@@ -34,6 +35,7 @@ def review_context(candidate,index,segments,plan=None):
         if not left<=brief.get('opening_source_time',-1)<right:
             for key in ('opening_source_time','opening_frame_id','opening_why','suggested_hook'):brief.pop(key,None)
     return {"candidate":{k:candidate.get(k) for k in ("title","setup","payoff","reason","start","end")},
+            "verified_source_highlight":candidate.get('highlight_evidence'),
             "proposal_is_unverified":True,"verified_source_interval":[left,right],
             "close_visual_observations":visual,
             "neighboring_speech":[{k:s[k] for k in ("start","end","text")} for s in segments
@@ -150,11 +152,11 @@ def retry_review(studio,job,operation):
     for attempt in range(2):
         try:
             return operation()
-        except runtime.vllm_backend.IncompleteResponse:
+        except (runtime.vllm_backend.IncompleteResponse,director.ReviewValidationError):
             if attempt:
                 raise
             if studio is not None:
-                studio.event(job,'The AI review was interrupted. Retrying only this review; the rendered video is saved.')
+                studio.event(job,'The AI review did not return a valid complete response. Retrying only this review; the rendered video is saved.')
 
 
 def same_render(first,second):
@@ -164,7 +166,8 @@ def same_render(first,second):
 
 
 def qualified(review,config):
-    return not review["reject"] and review["score"]>=max(70,config["min_score"]) and review["technical"]["passed"]
+    entertainment=not highlights.enabled({'config':config}) or review.get('entertainment_passed') is True
+    return entertainment and not review["reject"] and review["score"]>=max(70,config["min_score"]) and review["technical"]["passed"]
 
 
 def checkpoint_candidate(folder,ident,state):
@@ -184,6 +187,29 @@ def recover_invalid_plans(states):
             state.setdefault('planning_failures', []).append(state.pop('error'))
             state.update(status='pending', plan_recovery_version=director.PLAN_RECOVERY_VERSION)
             recovered += 1
+    return recovered
+
+
+def recover_review_errors(states):
+    """Older versions mislabeled invalid critic timecodes as invalid edits."""
+    recovered=0
+    for state in states.values():
+        if state.get('status')=='rejected' and str(state.get('error','')).startswith('review timestamp must be in '):
+            state.setdefault('review_validation_failures',[]).append(state.pop('error'))
+            state['status']='review_error'
+            recovered+=1
+    return recovered
+
+
+def recover_copy_errors(states):
+    recovered=0
+    for state in states.values():
+        error=str(state.get('error',''))
+        if state.get('status')=='rejected' and any(error.startswith(key+' needs a concise viewer question')
+                                                  for key in ('open_loop_1','open_loop_2','cta')):
+            state.setdefault('copy_validation_failures',[]).append(state.pop('error'))
+            state['status']='task_error'
+            recovered+=1
     return recovered
 
 
@@ -247,6 +273,7 @@ def prepare_initial_pool(studio,job,source,candidates,index,segments,metadata,fo
         aligned=analysis.align_candidate(studio,job,folder,audio_source,segments,candidate,index['language'])
         try:
             plan=director.make_plan(studio,job,candidate,index,aligned,previous=state.get('latest_plan'))
+            plan=highlights.configure_plan(plan,candidate,job['config'])
             runtime.atomic_json(path,plan)
             state['latest_plan']=plan
         except RuntimeError as exc:
@@ -287,6 +314,8 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
         else:
             runtime.atomic_json(path,plan)
         state["latest_plan"]=plan
+        plan=highlights.configure_plan(plan,candidate,job['config'])
+        if candidate.get('highlight_peak'):runtime.atomic_json(path,plan)
         checkpoint_candidate(folder,ident,state)
         studio.event(job,f"Rendering and reviewing draft {offset+1}/3: {candidate['title']}")
         runtime.unload()
@@ -338,6 +367,9 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
 def process_candidate(studio,job,source,candidate,index,segments,metadata,folder,states):
     """One child's entire lifecycle; callers isolate and retry this unit."""
     state=states[candidate['id']]
+    if highlights.enabled(job) and not highlights.verify_candidate(studio,job,source,folder,index,segments,candidate,state):
+        checkpoint_candidate(folder,candidate['id'],state)
+        return None
     if not (folder/f"plan-{candidate['id']}-r0.json").exists():
         prepare_initial_pool(studio,job,source,[candidate],index,segments,metadata,folder,states)
         if state['status']=='rejected':return None
@@ -399,16 +431,27 @@ def pipeline(studio,job):
     job["config"].update(model=chosen["director"],judge_model=runtime.VISION_MODEL)
     job['config'].setdefault('video_encoder','auto')
     studio.update(job,stage="Analyzing full video",progress=18)
-    index=(longform.build_index if long else analysis.build_index)(studio,job,source,folder,metadata,segments,language)
+    job['config']['selection_profile']=highlights.resolve(job)
+    if highlights.archive_old_qualifications(job):
+        studio.update(job,clips=job['clips'],archived_clips=job['archived_clips'])
+        studio.event(job,'Previous exports are preserved in the earlier selection. They do not count toward the stronger creator-highlight requirement.')
+    index=(highlights.map_source if highlights.enabled(job) else longform.build_index if long else analysis.build_index)(studio,job,source,folder,metadata,segments,language)
     if job["config"].get("content_mode")!="auto":
         index["mode"]=job["config"]["content_mode"]
     studio.update(job,stage="Finding complete moments",progress=40)
-    candidates=director.propose(studio,job,index,segments,folder)
+    candidates=(highlights.propose(studio,job,index,segments,folder,source) if highlights.enabled(job)
+                else director.propose(studio,job,index,segments,folder))
     states_path=folder/"candidate-progress.json"
     states=json.loads(states_path.read_text()) if states_path.exists() else {}
     if recover_invalid_plans(states):
         runtime.atomic_json(states_path, states)
         studio.event(job, 'Retrying invalid edit plans with the corrected planner. Saved import, transcript and scene analysis are reused.')
+    if recover_review_errors(states):
+        runtime.atomic_json(states_path,states)
+        studio.event(job,'Retrying saved drafts whose critic timestamps were invalid. Their edit plans and renders are reused.')
+    if recover_copy_errors(states):
+        runtime.atomic_json(states_path,states)
+        studio.event(job,'Retrying saved edits whose generated question formatting was invalid. Source analysis is reused.')
     tasks=longform.store(job,source,folder) if long else None
     if tasks:
         for candidate in candidates:
@@ -435,7 +478,9 @@ def pipeline(studio,job):
                 job["clips"].append(clip)
                 studio.event(job,f"Qualified clip {len(job['clips'])}/{job['config']['count']}: {clip['title']} ({clip['score']}/100).")
             else:
-                studio.event(job,"This candidate did not pass after two revisions. Trying the next complete event.")
+                studio.event(job,"Source-highlight check rejected this proposal before editing. Checking the next moment."
+                             if state.get('highlight_verdict',{}).get('passed') is False
+                             else "This candidate did not pass after two revisions. Trying the next complete event.")
         except (ValueError,KeyError) as exc:
             state.update(status="rejected",error=str(exc))
             studio.event(job,"Rejected an invalid edit plan: "+str(exc)[:500])
