@@ -172,9 +172,9 @@ class EfficiencyTests(unittest.TestCase):
             def check_cancel(self,*args):pass
             def event(self,*args):pass
             def update(self,job,**values):job.update(values)
-        selection={'clips':[{'window_id':'W001','complete':True,'start':1,'end':2,
+        selection={'W001':{'complete':True,'start':1,'end':2,
             'title':'A complete event','setup':'a real goal','payoff':'a real outcome','reason':'clear story','event_key':'event','score':4},
-            {'window_id':'invented','complete':True}]}
+            'invented':{'complete':True}}
         job={'id':'test','config':{'min_duration':61,'max_duration':120},'source':{}}
         index={'duration':210,'mode':'challenge','language':'en','blocks':[],'audio_events':[]}
         with tempfile.TemporaryDirectory() as name,patch.object(director,'call',side_effect=[selection,

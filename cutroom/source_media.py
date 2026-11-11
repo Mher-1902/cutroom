@@ -52,6 +52,8 @@ def import_error(error,config):
         return f'No usable cookie file was found for {browser}. Choose the browser where you are signed into YouTube and can play this video, or upload an accessible video file.'
     if authorized and any(term in lower for term in ('keychain','decrypt')):
         return f'macOS could not unlock the selected {browser} session. Choose another explicitly authorized browser session, or upload an accessible video file.'
+    if 'confirm your age' in lower and not authorized:
+        return 'YouTube has age-restricted this video and requires a signed-in account permitted to watch it. In Make it yours → Restricted YouTube video?, explicitly enable your authorized browser session, or upload an accessible video file. Retrying anonymously will not unlock it. No browser cookies were read.'
     if any(term in lower for term in ('confirm your age','sign in','cookies','private video','not a bot')):
         if authorized:
             return f'An authorized {browser} import was attempted, but YouTube did not accept that session for this video. Check that this video plays while signed into that browser, or upload an accessible video file.'

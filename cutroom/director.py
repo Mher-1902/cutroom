@@ -20,6 +20,9 @@ from .editor_contracts import CANDIDATES_SCHEMA, RANK_SCHEMA, PLAN_SCHEMA, REVIE
 
 
 def call(studio, job, system, prompt, schema, images=None, vision=False, predict=3072):
+    if job['config'].get('render_engine')=='remotion' and not vision and 'story_brief' in schema.get('properties',{}):
+        from .remotion_knowledge import DIRECTOR, guidance
+        system+='\n'+DIRECTOR+'\nInstalled workflow excerpts:\n'+guidance(studio.data,'director',800)
     return runtime.chat(runtime.VISION_MODEL if vision else job["config"]["model"], system, prompt, schema, images,
                         cancelled=lambda: studio.model_cancelled(job["id"]) if hasattr(studio,'model_cancelled') else studio.cancel_flags[job["id"]].is_set(), key=job["id"], predict=predict,
                         metrics=job.setdefault("inference", []))
@@ -78,6 +81,16 @@ def window_schema(windows):
     return schema
 
 
+def decision_schema(windows):
+    """Required object keys prevent omitted or repeated packet IDs."""
+    item=deepcopy(window_schema(windows)['properties']['clips']['items'])
+    item['properties'].pop('window_id')
+    item['required'].remove('window_id')
+    for key,limit in [('title',100),('setup',160),('payoff',160),('event_key',100),('reason',200)]:
+        item['properties'][key]['maxLength']=limit
+    return {'type':'object','properties':{key:deepcopy(item) for key in windows},'required':list(windows)}
+
+
 def propose(studio, job, index, segments, folder):
     if index.get('analysis_strategy')=='hierarchical-long-stream-v1':
         from .longform import propose as propose_long
@@ -85,7 +98,7 @@ def propose(studio, job, index, segments, folder):
     target = folder / "candidates.json"
     if target.exists():
         return json.loads(target.read_text())["candidates"]
-    partial = folder / "candidates-packets-v4-partial.json"
+    partial = folder / "candidates-packets-v6-partial.json"
     saved = json.loads(partial.read_text()) if partial.exists() else {"through": 0, "candidates": []}
     candidates = saved["candidates"]
     duration = index["duration"]
@@ -105,28 +118,37 @@ def propose(studio, job, index, segments, folder):
         studio.event(job,f"Checking complete event packets {offset+1}–{min(offset+3,len(windows))}/{len(windows)}.")
         prompt=(f"Source language: {index['language']}. Requested edit: {job['config']['min_duration']}–{job['config']['max_duration']} seconds. "
                 f"Audience brief: {job['config'].get('brief','')}. Source title (context, not proof of authenticity): {job.get('source_metadata',{}).get('title','')}. Attention hint: {job['source'].get('attention_hint',0)}. "
-                "Each packet contains ONLY its own source-window evidence. For EACH packet, choose at most ONE complete entertainment beat if it has a genuine setup and outcome inside that packet. "
-                "Return its matching window_id; do not borrow another packet's outcome. complete=false or omit when an essential setup/outcome is absent. "
+                "Each packet contains ONLY its own source-window evidence. Return an object keyed by the provided window IDs, with ONE decision under EACH key. "
+                "For narrated guides, reviews and news over game footage, a complete beat is one clear question/topic, its explanation and a supported takeaway. "
+                "The spoken answer IS the payoff; do not require an on-screen challenge, joke, win, or mission ending. Do not reject an explainer because its B-roll shows different scenes. "
+                "For live gameplay, reactions or challenges, retain the setup, action/reveal and actual outcome. A visual montage may use a visible reveal as payoff. "
+                "Use complete=false with a concrete reason ONLY when the packet lacks a standalone answer/outcome, is an unrelated sponsor read, or lacks enough usable footage. "
+                "A platform logo or branding inside a trailer is not a separate sponsor read. Do not borrow another packet's outcome. "
                 "The exact source window is already measured; do not invent timecodes. The later editor can trim the window to the chosen beat. "
                 "Visual summaries can be wrong: cross-check names, prizes and stated outcomes against the speech. Never conflate two different challenges at a transition. "
                 "For visually impressive game footage, a visual reveal can be the entertainment beat: promise a specific observable detail and retain its strongest view. Do not force every cinematic sequence into a plot summary. "
                 "Skip ads. Use an event_key describing the real physical event, not its window ID, consistently across overlapping packets. "
                 "Title <=10 words, setup/payoff <=18 words each, reason <=25 words. Score 1–5 for editorial potential.\n"
                 +json.dumps({'source_packets':packets},ensure_ascii=False,separators=(',',':')))
-        raw_path=folder/f'candidate-packets-v4-{offset:03}.json'
-        result=json.loads(raw_path.read_text()) if raw_path.exists() else call(studio,job,COMMON,prompt,window_schema(choices),predict=1500)
+        raw_path=folder/f'candidate-packets-v6-{offset:03}.json'
+        result=json.loads(raw_path.read_text()) if raw_path.exists() else call(studio,job,COMMON,prompt,decision_schema(choices),predict=1800)
         runtime.atomic_json(raw_path,result)
+        decisions=[{'window_id':ident,**item} for ident,item in result.items() if ident in choices and isinstance(item,dict)]
         used=set()
-        for item in result.get('clips',[])[:3]:
+        for item in decisions:
             ident=item.get('window_id')
             if item.get('complete') is not True or ident not in choices or ident in used:continue
             used.add(ident);left,right=choices[ident]
             candidates.append({**item,'start':left,'end':right,'id':uuid.uuid4().hex})
+        decided={item.get('window_id') for item in decisions}
+        if set(choices)-decided:
+            raise RuntimeError('Selection did not assess every source window. Completed decisions are saved; resume retries this small packet.')
         through=min(offset+3,len(windows))
         runtime.atomic_json(partial,{'through':through,'candidates':candidates})
         studio.update(job,progress=40+round(10*through/len(windows)),candidate_count=len(candidates))
     if not candidates:
-        raise RuntimeError("No complete candidate events were found. The analysis is saved so you can refine the brief and resume.")
+        reasons=[item.get('reason','') for path in folder.glob('candidate-packets-v6-*.json') for item in json.loads(path.read_text()).values() if isinstance(item,dict) and item.get('reason')]
+        raise RuntimeError("No standalone sequence at the chosen length was found. "+' '.join(reasons[:2])+" Try a shorter duration or another source; analysis is saved.")
     # Spread very long sources across the full timeline before global ranking.
     if len(candidates) > 60:
         candidates.sort(key=lambda c: c["start"])

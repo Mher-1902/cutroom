@@ -128,6 +128,9 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/style",path):
                 parts=path.split('/')
                 self.json_response(STUDIO.restyle(parts[3],parts[5],raw))
+            elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/remotion",path):
+                parts=path.split('/')
+                self.json_response(STUDIO.remotion(parts[3],parts[5]))
             else:
                 self.json_response({"error": "Not found"}, 404)
         except (ValueError, TypeError, KeyError) as exc:
