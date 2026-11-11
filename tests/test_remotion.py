@@ -47,6 +47,20 @@ class RemotionTests(unittest.TestCase):
             out=bridge.compile_project(root,root/'workspace',plan,mapped,[(0,1)],{},base)
             self.assertNotIn('<CutroomCaptions ',(out/'index.tsx').read_text())
 
+    def test_scene_trims_apply_to_video_and_caption_layers_together(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'static/fonts/captions').mkdir(parents=True)
+            base=root/'base.mp4';base.write_bytes(b'video')
+            plan={'duration':4,'layout':'fit','spans':[
+                {'out_start':0,'out_end':2,'kind':'normal','duration':2},
+                {'out_start':2,'out_end':4,'kind':'normal','duration':2}],'overlays':[]}
+            mapped=[{'start':2.5,'end':3.5,'text':'second scene'}]
+            out=bridge.compile_project(root,root/'workspace',plan,mapped,[],{},base)
+            jsx=(out/'index.tsx').read_text()
+            self.assertIn('from={60} trimBefore={60} durationInFrames={60}',jsx)
+            self.assertIn('from={75} durationInFrames={30}',jsx)
+            self.assertNotIn('<Video trimBefore=',jsx)
+
     def test_library_is_complete_checksummed_and_bounded(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);src=root/'installed';(src/'remotion-best-practices').mkdir(parents=True)

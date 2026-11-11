@@ -77,3 +77,8 @@ took 153.4 seconds including browser setup; h264_videotoolbox encoding was
 observed. This is a renderer test using saved analysis, not a newly completed
 AI production run or a whole-source turnaround promise. Main stays unchanged
 until the user has tested a fresh upload and approved the result.
+
+An additional real-media 18-second timeline test exercised cuts, a nonzero
+second-scene trim and a replay. Audio correlation against the prepared timeline
+measured 0 ms offset in all three scenes. Caption mapping and shared-parent
+trimming are covered by the regression checks.

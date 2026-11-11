@@ -28,8 +28,8 @@
     "typescript": "5.9.3"
   },
   "scripts": {
-    "dev": "node -r ./loopback.cjs ./node_modules/@remotion/cli/remotion-cli.js studio --no-open --ipv4",
-    "build": "remotion bundle",
+    "check": "tsc --noEmit",
+    "render": "node -r ./loopback.cjs render.mjs",
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc"
   }
