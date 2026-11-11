@@ -89,3 +89,13 @@ provide a spoken payoff, omitted tournament entries remain unapproved backups,
 and critic timecodes are bounded to the actual output duration. Invalid critic
 responses retry only that review; older timestamp-related false rejections are
 recovered from saved drafts. Quality and technical qualification gates remain.
+
+The failed 27-minute GTA guide was then recovered through new selection,
+direction, Remotion draft/final rendering, critique and automatic revisions.
+Its saved import/transcript/broad analysis were reused. Three finished shorts
+qualified at 85, 82 and 84 points, lasting 89.96, 70.88 and 64.48 seconds. All
+passed 1080×1920 technical checks; their source-time intervals do not overlap.
+MP4, cover, SRT, ASS and ZIP downloads were verified over HTTP, and the ZIP
+passed an integrity check. This is a recovery acceptance run, not a fresh-import
+speed benchmark. The 12-hour source also passed the formerly failing ranking
+stage and advanced to source-audio verification and detailed editing.
