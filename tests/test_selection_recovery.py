@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from cutroom import director, longform
+from cutroom import director, longform, pipeline_v2
 
 
 class SelectionRecoveryTests(unittest.TestCase):
@@ -49,3 +49,19 @@ class SelectionRecoveryTests(unittest.TestCase):
             record=json.loads((folder/'candidates.json').read_text())
             self.assertEqual(record['discarded_duplicates'],['0'])
             self.assertTrue(any('unranked' in call.args[1] for call in studio.event.call_args_list))
+
+    def test_invalid_critic_is_retried_without_rendering_or_changing_scores(self):
+        accepted={'score':72,'reject':False}
+        operation=Mock(side_effect=[director.ReviewValidationError('bad timestamp'),accepted])
+        self.assertEqual(pipeline_v2.retry_review(Mock(),{},operation),accepted)
+        self.assertEqual(operation.call_count,2)
+        operation=Mock(side_effect=director.ReviewValidationError('bad timestamp'))
+        with self.assertRaises(director.ReviewValidationError):pipeline_v2.retry_review(None,{},operation)
+        self.assertEqual(operation.call_count,2)
+
+    def test_bad_timestamp_rejection_is_recoverable_but_real_rejection_is_kept(self):
+        states={'bad':{'status':'rejected','error':'review timestamp must be in 0–64.31899999999999'},
+                'real':{'status':'rejected','error':'The story has no payoff.'}}
+        self.assertEqual(pipeline_v2.recover_review_errors(states),1)
+        self.assertEqual(states['bad']['status'],'review_error')
+        self.assertEqual(states['real']['status'],'rejected')

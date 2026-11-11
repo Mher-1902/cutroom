@@ -150,11 +150,11 @@ def retry_review(studio,job,operation):
     for attempt in range(2):
         try:
             return operation()
-        except runtime.vllm_backend.IncompleteResponse:
+        except (runtime.vllm_backend.IncompleteResponse,director.ReviewValidationError):
             if attempt:
                 raise
             if studio is not None:
-                studio.event(job,'The AI review was interrupted. Retrying only this review; the rendered video is saved.')
+                studio.event(job,'The AI review did not return a valid complete response. Retrying only this review; the rendered video is saved.')
 
 
 def same_render(first,second):
@@ -184,6 +184,17 @@ def recover_invalid_plans(states):
             state.setdefault('planning_failures', []).append(state.pop('error'))
             state.update(status='pending', plan_recovery_version=director.PLAN_RECOVERY_VERSION)
             recovered += 1
+    return recovered
+
+
+def recover_review_errors(states):
+    """Older versions mislabeled invalid critic timecodes as invalid edits."""
+    recovered=0
+    for state in states.values():
+        if state.get('status')=='rejected' and str(state.get('error','')).startswith('review timestamp must be in '):
+            state.setdefault('review_validation_failures',[]).append(state.pop('error'))
+            state['status']='review_error'
+            recovered+=1
     return recovered
 
 
@@ -409,6 +420,9 @@ def pipeline(studio,job):
     if recover_invalid_plans(states):
         runtime.atomic_json(states_path, states)
         studio.event(job, 'Retrying invalid edit plans with the corrected planner. Saved import, transcript and scene analysis are reused.')
+    if recover_review_errors(states):
+        runtime.atomic_json(states_path,states)
+        studio.event(job,'Retrying saved drafts whose critic timestamps were invalid. Their edit plans and renders are reused.')
     tasks=longform.store(job,source,folder) if long else None
     if tasks:
         for candidate in candidates:

@@ -34,6 +34,7 @@ def open_studio(studio, job):
         studio.update(job,stage='Preparing Remotion Studio',progress=75)
         prepare(studio,job,Path(job['source_file']),plan,speech(studio,job,clip),
                 json.loads((folder/'scene-index.json').read_text()),job['metadata'],folder,revision,True)
+    typescript_config(studio.root,workspace)
     key=str(workspace)
     process=_studios.get(key)
     if process is None or process.poll() is not None:
@@ -81,6 +82,12 @@ def attributes(**props):
     return ' '.join(name+'={'+js(value)+'}' for name,value in props.items())
 
 
+def typescript_config(root,workspace):
+    config=workspace/'tsconfig.json'
+    if not config.exists():
+        config.write_text(js({'extends':str(Path(root)/'remotion/tsconfig.json')}))
+
+
 def captions_for(words, start, end, origin, upper=False):
     return [{'text':(' ' if i else '')+(w['text'].upper() if upper else w['text']),
              'startMs':round((max(start,w['start'])-origin)*1000),
@@ -104,6 +111,7 @@ def compile_project(root, workspace, plan, mapped, suppressed, config, base):
     modules=workspace/'node_modules'
     if not modules.exists():modules.symlink_to(Path(root)/'remotion/node_modules',target_is_directory=True)
     (workspace/'package.json').write_text(js({'name':'cutroom-private-edit','private':True,'version':'1.0.0'}))
+    typescript_config(root,workspace)
     shared=Path(root)/'remotion/src/Cutroom'
     prefs=caption_styles.settings(plan.get('caption_settings',config.get('caption_settings')))
     y={'lower':1450,'middle':1130,'upper':570}.get(prefs['position'],1400 if plan['layout']=='fit' else 1330)

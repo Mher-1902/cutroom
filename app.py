@@ -186,7 +186,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             partial = True
         self.send_response(206 if partial else 200)
-        self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+        content_type='text/x-ssa; charset=utf-8' if path.suffix.lower()=='.ass' else mimetypes.guess_type(path.name)[0]
+        self.send_header("Content-Type", content_type or "application/octet-stream")
         self.send_header("Content-Length", str(max(0, end - start + 1)))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("X-Content-Type-Options", "nosniff")
