@@ -24,6 +24,8 @@ from .editor_contracts import CANDIDATES_SCHEMA, RANK_SCHEMA, PLAN_SCHEMA, REVIE
 
 
 def call(studio, job, system, prompt, schema, images=None, vision=False, predict=3072):
+    from . import highlights
+    if highlights.enabled(job):system+='\n'+highlights.GUIDE
     if job['config'].get('render_engine')=='remotion' and not vision and 'story_brief' in schema.get('properties',{}):
         from .remotion_knowledge import DIRECTOR, guidance
         system+='\n'+DIRECTOR+'\nInstalled workflow excerpts:\n'+guidance(studio.data,'director',800)
@@ -306,6 +308,8 @@ def repair_duration(studio, job, raw, candidate, index, segments, bounds, feedba
     low, high = job['config']['min_duration'], job['config']['max_duration']
     windows = {key: value for key, value in candidate_windows(*bounds, segments, low, high).items()
                if low <= value[1]-value[0] <= high}
+    from .highlights import interval_contains_peak
+    windows={key:value for key,value in windows.items() if interval_contains_peak(*value,candidate)}
     if not windows:
         raise RuntimeError('Director could not produce a safe, valid timeline: no measured interval fits the requested duration')
     properties = {key: deepcopy(PLAN_SCHEMA['properties'][key]) for key in
@@ -366,6 +370,8 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
             windows[f'W{len(windows)+1:03}']=[a,b]
     windows={key:value for key,value in windows.items()
              if not any(core.overlap_fraction({'start':value[0],'end':value[1]},clip)>.20 for clip in used)}
+    from .highlights import interval_contains_peak
+    windows={key:value for key,value in windows.items() if interval_contains_peak(*value,candidate)}
     if not windows:raise RuntimeError('Director could not produce a safe, valid timeline: no measured interval fits the requested duration')
     selection_schema={'type':'object','properties':{'window_id':{'type':'string','enum':list(windows)},
                       'complete':{'type':'boolean'},'reason':{'type':'string','maxLength':140}},
@@ -404,14 +410,16 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
                 'All material BETWEEN the two IDs will be retained. End on the actual payoff, not an ongoing attempt. '
                 'Set complete=false if no event is complete. Source boundaries are computed by code.\n'+
                 json.dumps({'suggested_title':candidate.get('title'),'source_title':job.get('source_metadata',{}).get('title',''),
-                    'requested_seconds':[low,high],'already_used_source_intervals':[[c['start'],c['end']] for c in used],'source_segments':[
+                    'requested_seconds':[low,high],'verified_highlight_peak':candidate.get('highlight_peak'),
+                    'source_highlight':candidate.get('highlight_evidence',{}).get('raw'),
+                    'already_used_source_intervals':[[c['start'],c['end']] for c in used],'source_segments':[
                     {'id':ident,**{k:s[k] for k in ('start','end','text')}} for ident,s in rows.items()]},
                     ensure_ascii=False,separators=(',',':'))+correction,event_schema,predict=240)
             if event.get('complete') is not True or event.get('start_id') not in rows or event.get('end_id') not in rows:
                 break
             a,b=rows[event['start_id']]['start'],rows[event['end_id']]['end']
             duplicate=any(core.overlap_fraction({'start':a,'end':b},clip)>.20 for clip in used)
-            if bounds[0]<=a<b<=bounds[1] and low<=b-a<=high and not duplicate:
+            if bounds[0]<=a<b<=bounds[1] and low<=b-a<=high and not duplicate and interval_contains_peak(a,b,candidate):
                 windows['EVENT']=[a,b]
                 chosen={'window_id':'EVENT','complete':True,'reason':event['reason']}
                 break
@@ -473,6 +481,7 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
                  'Aim for 80–120 characters in post copy; always stay under 160 including spaces/hashtags. '
                  'Use a conversational, specific teaser with the actual stakes or surprising detail, rather than a generic scene summary.\n'+
                  json.dumps({'selected_source_window':[start,end],'stage_evidence':stage_evidence,
+                             'verified_highlight':candidate.get('highlight_evidence',{}).get('raw'),
                              'visual_shots':visual.get('shot_suggestions',[]),'feedback':feedback},ensure_ascii=False,separators=(',',':')))
     correction=''
     for attempt in range(2):
@@ -642,6 +651,12 @@ def critique(studio, job, plan, sheets, transcript, technical, original_context,
     prompt+='\nKeep the reason under 70 words and the weakness under 35 words. Report up to four concrete problems; no repeated scene narration.'
     prompt+=' Verify Hook → Lead → Body 1 → Open loop 1 → Body 2 → Open loop 2 → Body 3 → CTA against the REAL finished footage. Set structure_passed=false ONLY if a stage is absent/out of order, a loop lacks its later answer, or required text is unreadable. A relevant question such as "Would you challenge LeBron?" IS a valid CTA. Generic wording or a preference for another reaction shot affects scores, not structural presence. Reserve reject=true for misleading/incomplete stories or serious technical/visual failures. Internal beat labels alone are not evidence of a coherent story.'
     schema=deepcopy(REVIEW_SCHEMA)
+    from .highlights import enabled,GUIDE
+    if enabled(job):
+        schema['properties'].update(entertainment_score={'type':'integer','minimum':1,'maximum':5},
+                                    raw_source_has_standout={'type':'boolean'})
+        schema['required']+=['entertainment_score','raw_source_has_standout']
+        prompt+='\n'+GUIDE+' Score entertainment separately: 1–2 ordinary, 3 mildly interesting, 4 a real standout, 5 exceptional. Ignore added typography/music when deciding raw_source_has_standout. A coherent NPC scene without a real creator reaction is not a creator highlight.'
     # Bound the response in the decoder as well as in the strict parser. Floor
     # milliseconds to avoid a rounded limit just beyond a float duration.
     limit=max(0,math.floor(plan['duration']*1000)/1000)

@@ -133,7 +133,7 @@ def import_source(studio, job):
     target = files[0]
     metadata = {"filename": target.name, "title": str(raw.get("title", "YouTube project"))[:180],
                 "duration": duration, "language": raw.get("language") or "auto", "uploader": raw.get("uploader", ""),
-                "url": url, "audio_format": audio}
+                "url": url, "audio_format": audio,"was_live":bool(raw.get('was_live'))}
     record.write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
     studio.update(job, name=metadata["title"], source_metadata=metadata)
     return target

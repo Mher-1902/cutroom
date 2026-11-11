@@ -1,4 +1,4 @@
-"""Short-lived CPU analysis processes keep Torch/aligner memory out of the web app."""
+"""Short-lived analysis processes keep Torch/aligner memory out of the web app."""
 import argparse
 import json
 import os
@@ -114,9 +114,47 @@ def retrieve(source, output, cache):
                    'passages':[{'start':p['start'],'end':p['end'],'score':round(float(score),4)} for p,score in zip(passages,scores)]})
 
 
+def reaction_audio(source,output,cache):
+    """Classify only proposed 10s bursts on GPU, never hours of waveform at once."""
+    import numpy as np
+    import subprocess
+    import torch
+    from transformers import AutoFeatureExtractor, ASTForAudioClassification
+    from cutroom.local_models import binary
+    torch.set_num_threads(2)
+    if torch.backends.mps.is_available():device='mps'
+    elif torch.cuda.is_available():device='cuda'
+    else:raise RuntimeError('The reaction audio classifier needs an available GPU; no CPU inference fallback was used.')
+    request=json.loads(source.read_text());name='MIT/ast-finetuned-audioset-10-10-0.4593'
+    extractor=AutoFeatureExtractor.from_pretrained(name,cache_dir=cache,local_files_only=True)
+    model=ASTForAudioClassification.from_pretrained(name,cache_dir=cache,local_files_only=True).eval().to(device)
+    identity=request['identity'];record={'identity':identity,'device':device,'classifier':name,'events':[],'complete':False}
+    if output.exists():
+        previous=json.loads(output.read_text())
+        if previous.get('identity')==identity:record=previous
+    for event in request['events'][len(record['events']):]:
+        start=max(0,event['at']-5);length=min(10,request['duration']-start)
+        raw=subprocess.check_output([binary('ffmpeg'),'-v','error','-nostdin','-ss',str(start),'-t',str(length),
+            '-i',request['media'],'-vn','-ac','1','-ar','16000','-threads','2','-f','f32le','-'])
+        audio=np.frombuffer(raw,dtype=np.float32).copy()
+        inputs=extractor(audio,sampling_rate=16000,return_tensors='pt')
+        with torch.inference_mode():scores=model(**{k:v.to(device) for k,v in inputs.items()}).logits[0].sigmoid().cpu()
+        labels={model.config.id2label[i]:round(float(scores[i]),5) for i in range(len(scores))}
+        human=max((score for label,score in labels.items() if any(word in label.lower() for word in
+                  ('scream','shout','yell','laughter','giggle','chuckle','cheer','whoop','gasp'))),default=0)
+        top=sorted(labels.items(),key=lambda item:item[1],reverse=True)[:8]
+        reactions=[{'label':label,'score':score} for label,score in labels.items() if any(word in label.lower() for word in
+                    ('scream','shout','yell','laugh','giggle','snicker','chuckle','cheer','whoop','gasp'))]
+        record['events'].append({**event,'audio_start':start,'audio_end':start+length,'human_reaction_score':human,
+                                 'labels':[{'label':label,'score':score} for label,score in top],'reaction_labels':reactions})
+        atomic(output,record)
+        print(f"Classified reaction burst {len(record['events'])}/{len(request['events'])} on {device}",flush=True)
+    record['complete']=True;atomic(output,record)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("task", choices=["audio", "align", "scenes", "retrieve", "prepare-audio","prepare-align"])
+    parser.add_argument("task", choices=["audio", "align", "scenes", "retrieve", "reaction-audio", "prepare-audio","prepare-align"])
     parser.add_argument("--source", type=Path)
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output", type=Path)
@@ -133,6 +171,8 @@ def main():
         align(args.source, args.input, args.output, str(args.cache))
     elif args.task == "scenes":
         scenes(args.source, args.output)
+    elif args.task == 'reaction-audio':
+        reaction_audio(args.source,args.output,str(args.cache))
     elif args.task == 'retrieve':
         retrieve(args.source,args.output,str(args.cache))
     elif args.task=='prepare-audio':

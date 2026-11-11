@@ -116,6 +116,9 @@ class Studio:
         if version == 2:
             from .caption_styles import settings as caption_settings
             config['caption_settings']=caption_settings(raw.get('caption_settings'))
+            from .highlights import PREFERENCES
+            config['moment_preference']=raw.get('moment_preference','auto')
+            if config['moment_preference'] not in PREFERENCES:raise ValueError('Unknown moment selection preference.')
             from .remotion_bridge import available
             config['render_engine']=raw.get('render_engine','remotion' if available(self.root) else 'ffmpeg')
             if config['render_engine'] not in {'remotion','ffmpeg'}:

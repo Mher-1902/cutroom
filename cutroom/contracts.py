@@ -202,7 +202,13 @@ class DraftReview:
                 raise ValueError("Unknown revision action")
             problems.append({"at": number(item.get("at", 0), 0, duration, "review timestamp"),
                              "issue": str(item.get("issue", ""))[:400], "action": action})
-        return cls({"version": VERSION, "score": round(sum(metrics[k] * REVIEW_WEIGHTS[k] for k in metrics) * 20),
+        extra={}
+        if 'entertainment_score' in raw:
+            entertainment=number(raw['entertainment_score'],1,5,'source entertainment')
+            if type(raw.get('raw_source_has_standout')) is not bool:raise ValueError('The entertainment verdict must be a boolean.')
+            extra={'entertainment_score':entertainment,'raw_source_has_standout':raw['raw_source_has_standout'],
+                   'entertainment_passed':entertainment>=4 and raw['raw_source_has_standout']}
+        return cls({"version": VERSION, **extra,"score": round(sum(metrics[k] * REVIEW_WEIGHTS[k] for k in metrics) * 20),
                     "structure_passed":raw.get('structure_passed',True),
                     "metrics": metrics, "reason": str(raw.get("reason", ""))[:1500],
                     "weakness": str(raw.get("weakness", ""))[:1000], "reject": bool(raw.get("reject", False)),
