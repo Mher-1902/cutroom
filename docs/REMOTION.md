@@ -82,3 +82,10 @@ An additional real-media 18-second timeline test exercised cuts, a nonzero
 second-scene trim and a replay. Audio correlation against the prepared timeline
 measured 0 ms offset in all three scenes. Caption mapping and shared-parent
 trimming are covered by the regression checks.
+
+Recovery fixes distinguish invalid model responses from editorial rejection:
+candidate packets require a separate keyed decision, narrated explanations can
+provide a spoken payoff, omitted tournament entries remain unapproved backups,
+and critic timecodes are bounded to the actual output duration. Invalid critic
+responses retry only that review; older timestamp-related false rejections are
+recovered from saved drafts. Quality and technical qualification gates remain.

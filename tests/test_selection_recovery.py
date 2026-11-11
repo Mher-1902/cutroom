@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from cutroom import director, longform, pipeline_v2
+from cutroom.contracts import REVIEW_WEIGHTS
 
 
 class SelectionRecoveryTests(unittest.TestCase):
@@ -65,3 +66,17 @@ class SelectionRecoveryTests(unittest.TestCase):
         self.assertEqual(pipeline_v2.recover_review_errors(states),1)
         self.assertEqual(states['bad']['status'],'review_error')
         self.assertEqual(states['real']['status'],'rejected')
+
+    def test_critic_decoder_uses_actual_duration_and_parser_stays_strict(self):
+        raw={k:4 for k in REVIEW_WEIGHTS}
+        raw.update(reason='Clear explanation.',weakness='Small text.',reject=False,
+                   problems=[{'at':64.3,'issue':'Small text.','action':'move_captions'}])
+        with patch.object(director,'call',return_value=raw) as call:
+            result=director.critique(object(),{}, {'duration':64.31899999999999},[],[],{}, {})
+        bounds=call.call_args.args[4]['properties']['problems']['items']['properties']['at']
+        self.assertEqual(bounds['minimum'],0)
+        self.assertLessEqual(bounds['maximum'],64.31899999999999)
+        self.assertEqual(result['score'],80)
+        raw['problems'][0]['at']=70
+        with patch.object(director,'call',return_value=raw),self.assertRaises(director.ReviewValidationError):
+            director.critique(object(),{}, {'duration':64.31899999999999},[],[],{}, {})
