@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -6,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from cutroom import director, longform, pipeline_v2
 from cutroom.contracts import REVIEW_WEIGHTS
+from cutroom.story_structure import BRIEF_SCHEMA
 
 
 class SelectionRecoveryTests(unittest.TestCase):
@@ -80,3 +82,15 @@ class SelectionRecoveryTests(unittest.TestCase):
         raw['problems'][0]['at']=70
         with patch.object(director,'call',return_value=raw),self.assertRaises(director.ReviewValidationError):
             director.critique(object(),{}, {'duration':64.31899999999999},[],[],{}, {})
+
+    def test_question_grammar_prevents_the_observed_missing_punctuation_failure(self):
+        for key in ('open_loop_1','open_loop_2','cta'):
+            field=BRIEF_SCHEMA['properties'][key]
+            self.assertNotIn('maxLength',field)
+            for question in ('Would you risk your profile?', '你会怎么做？', 'هل تخاطر بذلك؟'):
+                self.assertIsNotNone(re.fullmatch(field['pattern'],question))
+            for invalid in ('This is a statement.', 'Missing punctuation', 'x'*60+'?', 'A question? More text'):
+                self.assertIsNone(re.fullmatch(field['pattern'],invalid))
+        states={'copy':{'status':'rejected','error':'open_loop_2 needs a concise viewer question ending in a question mark.'}}
+        self.assertEqual(pipeline_v2.recover_copy_errors(states),1)
+        self.assertEqual(states['copy']['status'],'task_error')

@@ -198,6 +198,18 @@ def recover_review_errors(states):
     return recovered
 
 
+def recover_copy_errors(states):
+    recovered=0
+    for state in states.values():
+        error=str(state.get('error',''))
+        if state.get('status')=='rejected' and any(error.startswith(key+' needs a concise viewer question')
+                                                  for key in ('open_loop_1','open_loop_2','cta')):
+            state.setdefault('copy_validation_failures',[]).append(state.pop('error'))
+            state['status']='task_error'
+            recovered+=1
+    return recovered
+
+
 def failure_summary(states):
     unfinished = sum(s.get('status') in {'review_error','task_error'} for s in states.values())
     if unfinished:
@@ -423,6 +435,9 @@ def pipeline(studio,job):
     if recover_review_errors(states):
         runtime.atomic_json(states_path,states)
         studio.event(job,'Retrying saved drafts whose critic timestamps were invalid. Their edit plans and renders are reused.')
+    if recover_copy_errors(states):
+        runtime.atomic_json(states_path,states)
+        studio.event(job,'Retrying saved edits whose generated question formatting was invalid. Source analysis is reused.')
     tasks=longform.store(job,source,folder) if long else None
     if tasks:
         for candidate in candidates:
