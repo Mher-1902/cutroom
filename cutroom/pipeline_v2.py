@@ -213,6 +213,25 @@ def recover_copy_errors(states):
     return recovered
 
 
+def recover_server_errors(states):
+    """Clear stale service failures after a successful retry; retry real failures."""
+    recovered=0
+    for state in states.values():
+        error=str(state.get('error',''))
+        if not any(term in error for term in ('vLLM generation failed:', 'vLLM request failed:',
+                                              'vLLM stream ended without a complete response')):continue
+        state.setdefault('previous_server_errors',[]).append(state.pop('error'))
+        verdict=state.get('highlight_verdict',{})
+        if state.get('status')=='rejected' and verdict.get('passed') is False:
+            # A later complete source assessment already rejected this moment.
+            # Its old transport failure is history, not a current planning error.
+            recovered+=1
+            continue
+        state['status']='review_error' if state.get('revisions') else 'task_error'
+        recovered+=1
+    return recovered
+
+
 def failure_summary(states):
     unfinished = sum(s.get('status') in {'review_error','task_error'} for s in states.values())
     if unfinished:
@@ -222,13 +241,19 @@ def failure_summary(states):
                 'message':f'{unfinished} clip tasks did not finish. {detail} '
                           'Resume run retries the unfinished tasks. Other rejected edits remain in the editing report.'}
     planned = sum(bool(s.get('revisions')) for s in states.values())
-    invalid = [s for s in states.values() if s.get('error') and not s.get('revisions')]
+    invalid = [s for s in states.values() if s.get('status')=='rejected' and s.get('error')
+               and not s.get('revisions') and s.get('highlight_verdict',{}).get('passed') is not False]
     if not planned and invalid:
         reasons = list(dict.fromkeys(s['error'].removeprefix('Director could not produce a safe, valid timeline: ') for s in invalid))
         return {'stage': 'planning', 'invalid_plans': len(invalid), 'reviewed_candidates': 0,
                 'message': f"The editor could not create valid edit plans for {len(invalid)} candidates. "
                            "No videos reached rendering or quality review. " + ' '.join(reasons[:2]) +
                            ". The source and analysis are saved; this is an editing-plan failure, not a quality-score rejection."}
+    source_rejects=sum(s.get('highlight_verdict',{}).get('passed') is False and s.get('status')=='rejected' for s in states.values())
+    if not planned and source_rejects:
+        return {'stage':'selection','source_rejections':source_rejects,'reviewed_candidates':0,
+                'message':f'None of the {source_rejects} inspected moments met the creator-highlight requirement. '
+                          'No videos were rendered. The source checks and specific rejection reasons are saved in the editing report.'}
     return {'stage': 'review', 'invalid_plans': len(invalid), 'reviewed_candidates': planned,
             'message': f"No candidates passed the quality cutoff after reviewing {planned} rendered candidates. "
                        "The editing report and saved drafts contain the specific reasons."}
@@ -367,6 +392,8 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
 def process_candidate(studio,job,source,candidate,index,segments,metadata,folder,states):
     """One child's entire lifecycle; callers isolate and retry this unit."""
     state=states[candidate['id']]
+    if state.get('error'):
+        state.setdefault('previous_task_errors',[]).append(state.pop('error'))
     if highlights.enabled(job) and not highlights.verify_candidate(studio,job,source,folder,index,segments,candidate,state):
         checkpoint_candidate(folder,candidate['id'],state)
         return None
@@ -443,6 +470,9 @@ def pipeline(studio,job):
                 else director.propose(studio,job,index,segments,folder))
     states_path=folder/"candidate-progress.json"
     states=json.loads(states_path.read_text()) if states_path.exists() else {}
+    if recover_server_errors(states):
+        runtime.atomic_json(states_path,states)
+        studio.event(job,'Reconciled saved model-server failures. Finished assessments stay saved; only unfinished AI steps are retried.')
     if recover_invalid_plans(states):
         runtime.atomic_json(states_path, states)
         studio.event(job, 'Retrying invalid edit plans with the corrected planner. Saved import, transcript and scene analysis are reused.')
@@ -504,6 +534,12 @@ def pipeline(studio,job):
         studio.update(job,progress=min(97,50+round(45*(position+1)/len(candidates))),reviewed_candidates=position+1)
     if not job["clips"]:
         summary = failure_summary(states)
+        if summary['stage']=='selection':
+            studio.update(job,result_summary=summary['message'],failure_summary=None,has_retryable_tasks=False,error=None)
+            package(studio,job,folder,states,index)
+            studio.event(job,summary['message'])
+            runtime.unload()
+            return
         studio.update(job, failure_summary=summary)
         package(studio,job,folder,states,index)
         raise RuntimeError(summary['message'])

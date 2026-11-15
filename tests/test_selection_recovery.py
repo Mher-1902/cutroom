@@ -11,6 +11,19 @@ from cutroom.story_structure import BRIEF_SCHEMA
 
 
 class SelectionRecoveryTests(unittest.TestCase):
+    def test_stale_server_error_cannot_override_a_later_complete_source_verdict(self):
+        states={'done':{'status':'rejected','error':'vLLM generation failed: InternalServerError 500',
+                        'highlight_verdict':{'passed':False},'revisions':[]},
+                'unfinished':{'status':'rejected','error':'vLLM request failed: HTTP 500','revisions':[]},
+                'real':{'status':'rejected','error':'Director could not produce a safe, valid timeline: too short','revisions':[]}}
+        self.assertEqual(pipeline_v2.recover_server_errors(states),2)
+        self.assertNotIn('error',states['done']);self.assertEqual(states['done']['status'],'rejected')
+        self.assertTrue(states['done']['previous_server_errors'])
+        self.assertEqual(states['unfinished']['status'],'task_error')
+        self.assertEqual(pipeline_v2.failure_summary({'done':states['done']})['stage'],'selection')
+        self.assertEqual(pipeline_v2.failure_summary({'unfinished':states['unfinished']})['unfinished_reviews'],1)
+        self.assertEqual(pipeline_v2.failure_summary({'real':states['real']})['stage'],'planning')
+
     def test_explainer_decisions_replace_empty_v4_cache(self):
         with tempfile.TemporaryDirectory() as name:
             folder=Path(name)

@@ -492,6 +492,7 @@ class Studio:
         for ident, job in self.jobs.items():
             if job["status"] in {"queued", "running"}:
                 self.cancel_flags[ident].set()
+                runtime.cancel_request(ident)
                 process = self.processes.get(ident)
                 if process and process.poll() is None:
                     try:

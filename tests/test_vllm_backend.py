@@ -2,6 +2,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,54 @@ from cutroom import runtime, vllm_backend as backend
 
 
 class NativeBackendTests(unittest.TestCase):
+    def test_unload_waits_until_an_active_inference_has_released_its_weights(self):
+        entered=threading.Event();stopped=threading.Event()
+        def unload():
+            entered.set();runtime.unload()
+        with patch.object(backend,'stop',side_effect=stopped.set):
+            with runtime.inference_lock:
+                thread=threading.Thread(target=unload);thread.start()
+                self.assertTrue(entered.wait(1));self.assertFalse(stopped.wait(.05))
+            thread.join(1)
+        self.assertTrue(stopped.is_set());self.assertFalse(thread.is_alive())
+
+    def test_server_failure_restarts_only_owned_model_and_retries_same_request_once(self):
+        budget={'prompt_tokens':20};usage={'completion_tokens':5};metrics=[]
+        with patch.object(backend,'ensure_model') as ensure,patch.object(backend,'stop') as stop, \
+             patch.object(backend,'fit_context',return_value=budget), \
+             patch.object(backend,'stream',side_effect=[backend.ModelServerError('HTTP 500'),({'ok':True},usage)]) as stream:
+            result=runtime.chat(runtime.VISION_MODEL,'system','preserved source',{'type':'object'},metrics=metrics)
+        self.assertEqual(result,{'ok':True});self.assertEqual(ensure.call_count,2);stop.assert_called_once()
+        self.assertEqual(stream.call_args_list[0].args[0],stream.call_args_list[1].args[0])
+        self.assertEqual(metrics[0]['event'],'model_server_recovery')
+
+    def test_persistent_server_failure_is_bounded_and_partial_output_is_not_accepted(self):
+        with patch.object(backend,'ensure_model'),patch.object(backend,'stop') as stop, \
+             patch.object(backend,'fit_context',return_value={}), \
+             patch.object(backend,'stream',side_effect=backend.ModelServerError('still unavailable')) as stream:
+            with self.assertRaises(backend.ModelServerError):
+                runtime.chat(runtime.VISION_MODEL,'system','source',{'type':'object'})
+        self.assertEqual(stream.call_count,2);stop.assert_called_once()
+        with patch.object(backend,'ensure_model'),patch.object(backend,'stop') as stop, \
+             patch.object(backend,'fit_context',return_value={}), \
+             patch.object(backend,'stream',side_effect=backend.IncompleteResponse('output limit')):
+            with self.assertRaises(backend.IncompleteResponse):
+                runtime.chat(runtime.VISION_MODEL,'system','source',{'type':'object'})
+        stop.assert_not_called()
+
+    def test_batched_recovery_keeps_successful_window(self):
+        saved=[]
+        def stream(body,*args):
+            if body['messages'][1]['content']=='failed':raise backend.ModelServerError('HTTP 500')
+            return {'summary':'saved'},{'completion_tokens':5}
+        requests=[{'prompt':p,'schema':{'type':'object'}} for p in ('complete','failed')]
+        with patch.object(backend,'ensure_model'),patch.object(backend,'stream',side_effect=stream), \
+             patch.object(runtime,'chat',return_value={'summary':'recovered'}) as retry:
+            result=runtime.chat_batch(runtime.VISION_MODEL,'system',requests,on_result=lambda i,r:saved.append((i,r)))
+        self.assertEqual(result,[{'summary':'saved'},{'summary':'recovered'}])
+        retry.assert_called_once();self.assertEqual(retry.call_args.args[2],'failed')
+        self.assertEqual(len(saved),2)
+
     def test_context_budget_reserves_output_and_keeps_all_source_images(self):
         from PIL import Image
         import base64
