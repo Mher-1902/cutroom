@@ -191,7 +191,7 @@ def propose(studio, job, index, segments, folder):
     return ordered
 
 
-PLAN_RECOVERY_VERSION = 4
+PLAN_RECOVERY_VERSION = 5
 
 
 def validate_plan(raw, source_duration, minimum, maximum, bounds):
@@ -365,6 +365,10 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
             if low<=b-a<=high and [a,b] not in windows.values():
                 windows[f'W{len(windows)+1:03}']=[a,b]
     from . import editorial_checks
+    speech_led=index.get('mode') in {'tutorial','story'} and index.get('language')=='en'
+    if speech_led:
+        complete_windows=editorial_checks.sentence_windows(segments,*bounds,low,high)
+        if complete_windows:windows=complete_windows
     if index.get('language')=='en':
         windows={key:value for key,value in windows.items()
                  if not editorial_checks.dangling(editorial_checks.interval_tail(segments,*value))}
@@ -376,7 +380,7 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
         a=segment['start'];text=segment['text'].lower()
         score=sum(token in text for token in ('challeng','1v1','if you','your task','to win','let\'s try','the goal'))
         if score and bounds[0]<=a and a+low<=bounds[1]:setup.append((score,a))
-    for _,a in sorted(setup,reverse=True)[:3]:
+    for _,a in ([] if speech_led else sorted(setup,reverse=True)[:3]):
         b=min(bounds[1],a+high)
         if low<=b-a<=high and not any(abs(a-x)<.5 and abs(b-y)<.5 for x,y in windows.values()):
             windows[f'W{len(windows)+1:03}']=[a,b]
@@ -388,14 +392,16 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
     selection_schema={'type':'object','properties':{'window_id':{'type':'string','enum':list(windows)},
                       'complete':{'type':'boolean'},'reason':{'type':'string','maxLength':140}},
                       'required':['window_id','complete','reason']}
+    source_rows={f'T{i+1:03}':row for i,row in enumerate(compact_speech(segments,*bounds))}
+    event_rows={f'V{i+1:03}':event for i,event in enumerate(candidate.get('fine_evidence',{}).get('events',[]))
+                if bounds[0]<=event['at']<=event['end']<=bounds[1]}
     packets=[]
     for ident,(a,b) in windows.items():
-        speech=compact_speech(segments,a,b)
-        picks=sorted({round(i*(len(speech)-1)/5) for i in range(6)}) if speech else []
         packets.append({'window_id':ident,'start':a,'end':b,
-            'speech_samples':[{**speech[i],'text':speech[i]['text'][:120]} for i in picks],
-            'visual_events':[e for e in candidate.get('fine_evidence',{}).get('events',[]) if a<=e['at']<=e['end']<=b]})
-    original_rows=[s for s in segments if bounds[0]<=s['start']<s['end']<=bounds[1]]
+            'speech_ids':[key for key,row in source_rows.items() if a<=row['start']<row['end']<=b],
+            'visual_ids':[key for key,event in event_rows.items() if a<=event['at']<=event['end']<=b]})
+    complete_rows=editorial_checks.sentence_rows(segments) if speech_led else []
+    original_rows=[s for s in (complete_rows or segments) if bounds[0]<=s['start']<s['end']<=bounds[1]]
     rows={f'S{i+1:03}':s for i,s in enumerate(original_rows)
           if not any(max(s['start'],c['start'])<min(s['end'],c['end']) for c in used)}
     if original_rows and not rows:
@@ -452,9 +458,11 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
             f'Select ONE measured {low}–{high}-second window containing a complete standalone topic or event. '
             'For narrated news/reviews/explainers, require a clear question/topic, substantive explanation and supported takeaway. '
             'For gameplay/challenges/reactions, require setup, development and actual outcome or response. '
-            'Each packet contains only its own interval observations. Do not borrow another window\'s payoff. '
+            'Each packet references measured speech_ids and visual_ids in the shared evidence tables. '
+            'Read that window\'s referenced evidence; text is stored once to avoid repetition. Do not borrow another window\'s payoff. '
             'Set complete=false if no complete event is supported. Return one supplied window_id.\n'+
-            json.dumps({'proposed_title':candidate.get('title'),'packets':packets,'revision_feedback':selection_feedback},ensure_ascii=False,separators=(',',':')),
+            json.dumps({'proposed_title':candidate.get('title'),'packets':packets,'source_rows':source_rows,
+                        'visual_evidence':event_rows,'revision_feedback':selection_feedback},ensure_ascii=False,separators=(',',':')),
             selection_schema,predict=240)
     if chosen.get('complete') is not True or chosen.get('window_id') not in windows:
         raise RuntimeError('Director could not produce a safe, valid timeline: no complete event fits the requested duration')

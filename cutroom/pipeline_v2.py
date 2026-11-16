@@ -146,7 +146,8 @@ def evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candi
         review['story_review_reused']=reusable
         runtime.atomic_json(cache,review)
     from .editorial_checks import review_problems
-    integrity=review_problems(plan,record['mapped'],job,original_segments,index.get('language',job.get('language')))
+    integrity=review_problems(plan,record['mapped'],job,original_segments,index.get('language',job.get('language')),
+                              aligned=aligned,source_mode=index.get('mode'))
     if integrity:
         review['reject']=True
         review['integrity_problems']=integrity
@@ -340,6 +341,24 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
         prior=state.get("latest_plan")
         plan=director.make_plan(studio,job,candidate,index,aligned,previous=prior,feedback=user_notes)
         runtime.atomic_json(plan_path,plan)
+    from .editorial_checks import boundary_problems
+    boundary_issues=boundary_problems(plan,aligned,index.get('language'),index.get('mode'))
+    if boundary_issues:
+        # Preserve the rejected plan/draft and repair only the source edit,
+        # before spending another render plus two model reviews on it.
+        repaired_path=folder/f'plan-{ident}-r{starting_revision+1}.json'
+        agents.record(folder,ident,'lead','revise_plan',{'boundary_problems':boundary_issues},
+                      {'reason':'Repair measured speech boundaries before rendering.'},starting_revision)
+        if repaired_path.exists():
+            plan=json.loads(repaired_path.read_text())
+        else:
+            studio.event(job,'Correcting measured speech boundaries before rendering; the previous draft is preserved.')
+            plan=director.make_plan(studio,job,candidate,index,aligned,previous=plan,
+                feedback={'review':{'problems':boundary_issues,'reason':'Retain complete source sentences and aligned words.'},'user_notes':user_notes})
+            runtime.atomic_json(repaired_path,plan)
+        if boundary_problems(plan,aligned,index.get('language'),index.get('mode')):
+            raise RuntimeError('Director could not produce a safe, valid timeline: the repaired edit still cuts spoken words or narrated sentences')
+        starting_revision+=1
     runtime.unload()
     history=state.setdefault("revisions",[])
     for offset in range(3):

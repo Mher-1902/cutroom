@@ -90,7 +90,9 @@ class SceneLayoutTests(unittest.TestCase):
             class Studio:
                 root=Path(__file__).resolve().parents[1]
                 data=folder
-                def run(self,job,args):return subprocess.check_output(args,text=True,stderr=subprocess.PIPE)
+                def run(self,job,args):
+                    try:return subprocess.check_output(args,text=True,stderr=subprocess.PIPE)
+                    except subprocess.CalledProcessError as exc:raise RuntimeError(exc.stderr) from exc
                 def event(self,*args):pass
             metadata={'width':640,'height':360,'has_audio':True}
             edit=plan();edit['spans']=[{'start':0,'end':4,'speed':1.1}, {'start':4,'end':6},

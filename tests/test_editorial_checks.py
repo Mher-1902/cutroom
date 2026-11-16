@@ -11,6 +11,52 @@ from cutroom.contracts import ClipEditPlan
 
 
 class EditorialChecksTests(unittest.TestCase):
+    def test_phrase_chunks_become_complete_source_sentence_options(self):
+        segments=[{'start':0,'end':2,'text':'The opening','words':[{'start':0,'end':2,'text':'The opening'}]},
+                  {'start':2,'end':4,'text':'finishes here.','words':[{'start':2,'end':4,'text':'finishes here.'}]},
+                  {'start':5,'end':10,'text':'The actual answer.','words':[{'start':5,'end':10,'text':'The actual answer.'}]}]
+        rows=checks.sentence_rows(segments)
+        self.assertEqual([(r['start'],r['end']) for r in rows],[(0,4),(5,10)])
+        self.assertEqual(list(checks.sentence_windows(segments,0,10,6,10).values()),[[0,10]])
+
+    def test_narrated_boundary_guard_catches_complete_words_in_incomplete_sentences(self):
+        source=[{'start':0,'end':10,'text':'The first sentence ends here.','words':[
+                    {'start':0,'end':2,'text':'The'},{'start':2,'end':4,'text':'first'},
+                    {'start':4,'end':8,'text':'sentence'},{'start':8,'end':10,'text':'ends here.'}]}]
+        plan=ClipEditPlan.parse({'spans':[{'start':2,'end':8}]},10,5,10).to_dict()
+        issues=checks.boundary_problems(plan,source,'en','tutorial')
+        self.assertEqual({i['action'] for i in issues},{'more_context','tighten'})
+        self.assertEqual(checks.boundary_problems(plan,source,'en','gameplay'),[])
+        whole=ClipEditPlan.parse({'spans':[{'start':0,'end':10}]},10,5,10).to_dict()
+        self.assertEqual(checks.boundary_problems(whole,source,'en','tutorial'),[])
+
+    def test_audible_midword_cut_is_checked_against_aligned_words(self):
+        source=[{'start':0,'end':10,'text':'A long word.', 'words':[{'start':2,'end':4,'text':'word','confidence':.9}]}]
+        plan=ClipEditPlan.parse({'spans':[{'start':3,'end':10}]},10,5,10).to_dict()
+        issues=checks.boundary_problems(plan,source,'en','gameplay')
+        self.assertTrue(any('inside an aligned spoken word' in i['issue'] for i in issues))
+        source[0]['words'][0]['confidence']=.1
+        self.assertEqual(checks.boundary_problems(plan,source,'en','gameplay'),[])
+
+    def test_fallback_selector_shares_evidence_instead_of_repeating_transcripts(self):
+        class Captured(Exception):pass
+        rows=[{'start':i*10,'end':i*10+9,'text':'Unique source sentence '+str(i)+'.'} for i in range(12)]
+        def inspect(studio,job,system,prompt,schema,**kwargs):
+            if 'start_id' in schema['properties']:
+                return {'start_id':'S001','end_id':'S001','complete':False,'reason':'Exercise the window fallback.'}
+            data=json.loads(prompt[prompt.index('{"proposed_title"'):])
+            self.assertTrue(data['source_rows']);self.assertGreater(len(data['packets']),1)
+            for source in data['source_rows'].values():self.assertEqual(prompt.count(source['text']),1)
+            for packet in data['packets']:
+                self.assertTrue(set(packet['speech_ids'])<=set(data['source_rows']))
+                self.assertNotIn('speech_samples',packet)
+            self.assertLess(len(prompt),8000)
+            raise Captured()
+        job={'id':'test','config':{'min_duration':60,'max_duration':90},'clips':[]}
+        with patch.object(director,'call',side_effect=inspect),self.assertRaises(Captured):
+            director.measured_plan(None,job,{'id':'event','title':'One topic','start':0,'end':120},
+                                   {'duration':120,'language':'en','mode':'tutorial'},rows)
+
     def test_refinement_director_uses_the_same_aligned_speech_as_renderer(self):
         class RenderReached(Exception):pass
         class Studio:
