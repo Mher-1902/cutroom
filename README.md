@@ -47,6 +47,14 @@ The runtime benchmark chooses from explicit source-window IDs, avoiding invented
 
 The director and story critic are separate requests using the selected director weights; they are not statistically independent judges. Visual critique uses the separate 9B model. Models can misread footage, captions and context. Human viewing remains necessary before publishing.
 
+The [OpenShorts integration review](docs/openshorts-review.md) documents which
+open-source techniques were adapted and which were excluded. Agent handoffs now
+record source observations, direction, scene framing, draft criticism and the
+lead's bounded revision/export decisions. Creator-camera and gameplay observations
+are separated before the source judge; framing protects measured source text per
+scene, and a final collection check rejects repeated source footage before rendering.
+The existing calibrated local models are shared sequentially, not loaded once per role.
+
 Framing supports subject-aware crops, an actual gameplay/facecam split and a full-frame blurred-backdrop fallback. Each source span can choose its own crop or fit treatment, so close-ups can fill the portrait frame while wide shots retain important action. The director and critic use a source-grounded [editorial brief](docs/editorial-reference.md) for clearer openings, earned payoffs, readable text and deliberate effects. Cropping falls back when it would lose wide action. Existing readable source captions are detected with visual/OCR evidence so generated speech captions can be suppressed during overlap. Captions use bundled Barlow Condensed and Anton. Source-language coverage depends on transcription, alignment and available font glyphs; the app does not translate dialogue.
 
 Finishing uses locally bundled CC0 music and sound effects, speech normalization, music ducking, a final limiter and measured true-peak checks. The local catalog records source URLs, SHA-256 hashes and licenses. It covers action, tension, comedy and relaxed moods. A watermark or credit can be positioned in any corner with adjustable opacity; it is a branding/attribution feature and conveys no rights or monetization approval.

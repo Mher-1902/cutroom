@@ -15,3 +15,24 @@ The prominent count selector accepts every integer from 1 to 10. Both YouTube an
 Changes remain on `preview/portrait-editorial`, off main, pending remaining engine acceptance checks. The user has approved the revised portrait editing preview.
 
 Sources: [vLLM Metal 0.33.0 installation](https://github.com/vllm-project/vllm-metal/blob/v0.33.0/install.sh), [supported models](https://github.com/vllm-project/vllm-metal/blob/v0.33.0/docs/supported_models.md), [configuration](https://github.com/vllm-project/vllm-metal/blob/v0.33.0/docs/configuration.md).
+
+## Interrupted-request recovery — 15 November 2026
+
+A stopped GPU worker can leave an HTTP streaming connection open. Active owned
+requests now check server health, release a dead connection, restart only the
+owned model server and retry the same request once. Successful neighboring batch
+windows stay checkpointed. Cancellation, invalid schemas and truncated output do
+not silently become accepted responses. Model unloading waits for active inference;
+shutdown first interrupts registered connections.
+
+A real local test interrupted a 9B vision request with SIGTERM. The same request
+completed after one automatic model restart, with Metal GPU use verified. The
+76.55-second measurement includes initial model loading, interruption, reloading
+and the recovered response; it is not an end-to-end video estimate.
+
+Older saved jobs could retain a 500 error after a later retry had already returned
+a complete source rejection. Resume now archives that stale transport error. A
+completed selection with no qualifying moments reports an empty collection and
+its editorial reasons, rather than falsely reporting a model/planning crash.
+Actual unfinished technical failures stay retryable and distinct from source
+quality decisions. Main remains held for the user's video acceptance.

@@ -178,6 +178,7 @@ class ImportTests(unittest.TestCase):
         from cutroom.engine import Studio
         with tempfile.TemporaryDirectory() as name:
             studio=Studio.__new__(Studio)
+            studio.root=Path(name)
             studio.data=Path(name);studio.jobs_dir=Path(name)/'jobs';studio.jobs_dir.mkdir()
             studio.setup_state={'running':False};studio.jobs={};studio.cancel_flags={}
             studio.lock=threading.RLock();studio.queue=queue.Queue()
@@ -279,10 +280,13 @@ class RecoveryTests(unittest.TestCase):
                 jobs_dir=folder.parent
                 data=folder
                 def event(self,*a):pass
+                def update(self,job,**fields):job.update(fields)
             job={'id':folder.name,'pending_refine':{'clip_id':ident,'notes':'new notes'},'clips':[old],'source_file':str(folder/'source.mp4'),'metadata':{}}
             with patch('cutroom.pipeline_v2.work_candidate',return_value=None) as work, patch('cutroom.pipeline_v2.package'),patch('cutroom.pipeline_v2.runtime.unload'):
                 pipeline_v2.refine(Studio(),job)
             self.assertEqual(work.call_args.kwargs['starting_revision'],6)
             self.assertEqual(work.call_args.kwargs['user_notes'],'new notes')
+            self.assertEqual(job['stage'],'Refining clip')
+            self.assertEqual(job['progress'],50)
 
 if __name__=='__main__':unittest.main()

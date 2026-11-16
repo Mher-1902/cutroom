@@ -14,6 +14,8 @@ import subprocess
 import threading
 import time
 import urllib.request
+import urllib.error
+import http.client
 
 from . import local_models, vllm_backend
 
@@ -105,8 +107,9 @@ def health(data):
 
 def unload():
     global _loaded
-    vllm_backend.stop()
-    _loaded = None
+    with inference_lock:
+        vllm_backend.stop()
+        _loaded = None
 
 
 def cancel_request(key):
@@ -131,7 +134,6 @@ def chat(model, system, prompt, schema, images=None, cancelled=lambda: False, ke
         body = vllm_backend.payload(model, system, prompt, schema, images, predict)
         started = time.time()
         vllm_backend.ensure_model(model, cancelled)
-        loaded = time.time()
         def register(response):
             with _active_lock:
                 if key:
@@ -140,8 +142,24 @@ def chat(model, system, prompt, schema, images=None, cancelled=lambda: False, ke
             with _active_lock:
                 _active_responses.pop(key, None)
         try:
-            budget=vllm_backend.fit_context(body)
-            result, usage = vllm_backend.stream(body, cancelled, register, unregister)
+            for attempt in range(2):
+                loaded=time.time()
+                try:
+                    budget=vllm_backend.fit_context(body)
+                    result, usage = vllm_backend.stream(body, cancelled, register, unregister)
+                    break
+                except (vllm_backend.ModelServerError, urllib.error.URLError, ConnectionError,
+                        TimeoutError, http.client.IncompleteRead) as exc:
+                    if isinstance(exc,urllib.error.HTTPError) and exc.code<500:raise
+                    if cancelled():raise RuntimeError('Cancelled')
+                    if attempt:raise vllm_backend.ModelServerError(str(exc)) from exc
+                    if metrics is not None:
+                        metrics.append({'runtime':'vllm-metal','event':'model_server_recovery','model':model,'reason':str(exc)[:500]})
+                    if key and re.fullmatch(r'[a-f0-9]{32}',str(key)):
+                        atomic_json(vllm_backend.DATA/'jobs'/str(key)/'model-recovery.json',
+                                    {'model':model,'reason':str(exc),'time':time.time(),'action':'Restart owned model and retry this request once.'})
+                    vllm_backend.stop()
+                    vllm_backend.ensure_model(model,cancelled)
         except vllm_backend.IncompleteResponse as exc:
             # Private diagnostics live beside this job, never in public source
             # or the user-facing error. Never accept a truncated model answer.
@@ -195,8 +213,17 @@ def chat_batch(model, system, requests, cancelled=lambda:False, key=None, metric
                     results[index]=future.result()
                     if on_result:on_result(index,results[index])
                 except Exception as exc:
-                    errors.append(exc)
-        if errors:raise errors[0]
+                    errors.append((index,exc))
+        fatal=[exc for _,exc in errors if not isinstance(exc,(vllm_backend.ModelServerError,
+                    urllib.error.URLError,ConnectionError,TimeoutError,http.client.IncompleteRead))]
+        if fatal:raise fatal[0]
+        # Both workers have exited before recovery can release model weights.
+        # Keep successful windows and retry only the failed window requests.
+        for index,_ in errors:
+            request=requests[index]
+            results[index]=chat(model,system,request['prompt'],request['schema'],request.get('images'),
+                                cancelled=cancelled,key=f'{key}:{index}',metrics=metrics,predict=request.get('predict',900))
+            if on_result:on_result(index,results[index])
         return results
 
 

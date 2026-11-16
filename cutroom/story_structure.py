@@ -6,9 +6,10 @@ LABELS=('Hook','Lead','Body 1','Open loop 1','Body 2','Open loop 2','Body 3','CT
 BRIEF_SCHEMA={'type':'object','properties':{key:{'type':'string','minLength':1,'maxLength':75} for key in STAGES},
               'required':list(STAGES)}
 for _key in ('open_loop_1','open_loop_2','cta'):
-    # Simple bounded strings are reliable on the pinned Metal backend. Question
-    # punctuation is validated in Python and repaired in a small copy-only call.
-    BRIEF_SCHEMA['properties'][_key]={'type':'string','minLength':4,'maxLength':60}
+    # The pinned decoder supports bounded patterns, but not a pattern combined
+    # with minLength/maxLength. Enforce punctuation during generation rather
+    # than throwing away a valid edit over a missing question mark.
+    BRIEF_SCHEMA['properties'][_key]={'type':'string','pattern':r'^[^\r\n?？؟]{3,59}[?？؟]$'}
 DIRECTIVE=(
     'EVERY short must follow these eight beats in order: Hook, Lead, Body 1, Open loop 1, '
     'Body 2, Open loop 2, Body 3, CTA. Fill story_brief with specific source-grounded intent for EACH beat. '

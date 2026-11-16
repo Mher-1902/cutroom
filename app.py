@@ -128,6 +128,9 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/style",path):
                 parts=path.split('/')
                 self.json_response(STUDIO.restyle(parts[3],parts[5],raw))
+            elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}/clips/[a-f0-9]{32}/remotion",path):
+                parts=path.split('/')
+                self.json_response(STUDIO.remotion(parts[3],parts[5]))
             else:
                 self.json_response({"error": "Not found"}, 404)
         except (ValueError, TypeError, KeyError) as exc:
@@ -183,7 +186,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             partial = True
         self.send_response(206 if partial else 200)
-        self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+        content_type='text/x-ssa; charset=utf-8' if path.suffix.lower()=='.ass' else mimetypes.guess_type(path.name)[0]
+        self.send_header("Content-Type", content_type or "application/octet-stream")
         self.send_header("Content-Length", str(max(0, end - start + 1)))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("X-Content-Type-Options", "nosniff")

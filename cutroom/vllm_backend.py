@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -36,6 +37,10 @@ class IncompleteResponse(RuntimeError):
         super().__init__(message)
         self.partial = partial
         self.usage = usage or {}
+
+
+class ModelServerError(RuntimeError):
+    """A failed local inference service, rather than invalid source/edit data."""
 
 
 def configure(data):
@@ -128,11 +133,13 @@ def stop():
     global _process, _log, _model, _log_start
     with _lock:
         if _process is not None and _process.poll() is None:
-            os.killpg(_process.pid, signal.SIGTERM)
+            try:os.killpg(_process.pid, signal.SIGTERM)
+            except ProcessLookupError:pass
             try:
                 _process.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                os.killpg(_process.pid, signal.SIGKILL)
+                try:os.killpg(_process.pid, signal.SIGKILL)
+                except ProcessLookupError:pass
                 _process.wait(timeout=10)
         if _log is not None:
             _log.close()
@@ -289,12 +296,33 @@ def stream(body, cancelled, register, unregister):
     request = urllib.request.Request(BASE_URL + "/v1/chat/completions", data=json.dumps(body).encode(),
                                      headers={"Content-Type": "application/json"})
     try:
-        response = urllib.request.urlopen(request, timeout=1800)
+        response = urllib.request.urlopen(request, timeout=120)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError("vLLM request failed: " + exc.read(2000).decode(errors="replace")) from exc
+        message="vLLM request failed: " + exc.read(2000).decode(errors="replace")
+        if exc.code>=500:raise ModelServerError(message) from exc
+        raise RuntimeError(message) from exc
     pieces, usage, finish = [], {}, None
     with response:
         register(response)
+        finished=threading.Event()
+        # A dying API server can leave an SSE socket open while its GPU worker
+        # has already stopped. Do not wait the full socket timeout for EOF.
+        def watch_server():
+            failures=0
+            while not finished.wait(2):
+                try:
+                    if process_id() is None:raise ConnectionError('Owned model exited')
+                    with urllib.request.urlopen(BASE_URL+'/health',timeout=2) as health:
+                        if health.status!=200:raise ConnectionError('Model is unhealthy')
+                    failures=0
+                except (OSError,ValueError):
+                    failures+=1
+                    if failures<2:continue
+                    try:response.fp.raw._sock.shutdown(socket.SHUT_RDWR)
+                    except (AttributeError,OSError):pass
+                    return
+        if process_id() is not None:
+            threading.Thread(target=watch_server,daemon=True,name='cutroom-model-health').start()
         try:
             for line in response:
                 if cancelled():
@@ -306,19 +334,20 @@ def stream(body, cancelled, register, unregister):
                     break
                 item = json.loads(data)
                 if item.get("error"):
-                    raise RuntimeError("vLLM generation failed: " + str(item["error"])[:1200])
+                    raise ModelServerError("vLLM generation failed: " + str(item["error"])[:1200])
                 for choice in item.get("choices", []):
                     pieces.append(choice.get("delta", {}).get("content") or "")
                     finish = choice.get("finish_reason") or finish
                 usage = item.get("usage") or usage
         finally:
+            finished.set()
             unregister()
     if cancelled():
         raise RuntimeError("Cancelled")
     if finish == "length":
         raise IncompleteResponse("vLLM reached its output limit. The incomplete response was not accepted.", ''.join(pieces), usage)
     if finish != "stop":
-        raise RuntimeError("vLLM stream ended without a complete response. Resume this stage to retry.")
+        raise ModelServerError("vLLM stream ended without a complete response. Resume this stage to retry.")
     try:
         return json.loads("".join(pieces)), usage
     except ValueError as exc:

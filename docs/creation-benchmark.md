@@ -47,3 +47,24 @@ rendered a 79.52-second 1080×1920 MP4. VideoToolbox rendering took **25.67 seco
 audio/container checks and packaging add time. Playback, version preservation
 and a 15-member ZIP with no corrupt entries were verified. This is a measured
 style-only revision, not an end-to-end generation time estimate.
+
+## Recovery acceptance — 16 November 2026
+
+A fresh local excerpt of 116 seconds completed import, transcription, visual
+analysis, direction, Remotion rendering, review and ZIP export in **833.26
+seconds**. It produced an 89.64-second H.264/AAC 1080×1920 file. ZIP integrity,
+subtitle/cover inclusion and audio/container checks passed. This excludes a
+YouTube download and is not a one-hour-source timing estimate.
+
+The initial critic's 86/100 missed an unsupported GTA V label and a sentence cut
+off at “how”. That export is technical evidence, not editorial acceptance. New
+checks ground GTA versions in source text and reject obvious clipped endings.
+Editing considers shorter lengths inside the requested duration range, passes
+timing feedback into source selection, and uses aligned word timings during
+refinement as well as rendering. Generated formatting labels are stripped from
+post copy. Exact source bounds are respected by the measured editor.
+
+The verification correction uses an explicitly selected source paragraph. It
+must not be presented as proof of autonomous highlight discovery. The newer Kai
+highlight test inspected forty proposals and qualified zero; its stale server
+error is cleared, while its editorial limitation remains. Main stays unmerged.

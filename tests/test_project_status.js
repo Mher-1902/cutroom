@@ -1,6 +1,13 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const status=require('../static/project-status.js');
+test('completed audio-guided selection does not falsely show scout tasks queued',()=>{
+ const job={status:'complete',config:{selection_profile:'creator_highlights',count:1},clips:[],
+            processing_strategy:{mode:'long_stream',scout_count:24}};
+ assert.match(status.scouting(job),/Selection complete/);
+ assert.doesNotMatch(status.scouting(job),/queued/);
+ assert.match(status.scouting(job),/0\/1 shorts ready/);
+});
 test('queued jobs explain the active project instead of displaying 0 percent',()=>{
  const job={id:'new',status:'queued',progress:0};
  const other={id:'active',status:'running',name:'Earlier project',stage:'Editing'};

@@ -52,6 +52,8 @@ def import_error(error,config):
         return f'No usable cookie file was found for {browser}. Choose the browser where you are signed into YouTube and can play this video, or upload an accessible video file.'
     if authorized and any(term in lower for term in ('keychain','decrypt')):
         return f'macOS could not unlock the selected {browser} session. Choose another explicitly authorized browser session, or upload an accessible video file.'
+    if 'confirm your age' in lower and not authorized:
+        return 'YouTube has age-restricted this video and requires a signed-in account permitted to watch it. In Make it yours → Restricted YouTube video?, explicitly enable your authorized browser session, or upload an accessible video file. Retrying anonymously will not unlock it. No browser cookies were read.'
     if any(term in lower for term in ('confirm your age','sign in','cookies','private video','not a bot')):
         if authorized:
             return f'An authorized {browser} import was attempted, but YouTube did not accept that session for this video. Check that this video plays while signed into that browser, or upload an accessible video file.'
@@ -131,7 +133,7 @@ def import_source(studio, job):
     target = files[0]
     metadata = {"filename": target.name, "title": str(raw.get("title", "YouTube project"))[:180],
                 "duration": duration, "language": raw.get("language") or "auto", "uploader": raw.get("uploader", ""),
-                "url": url, "audio_format": audio}
+                "url": url, "audio_format": audio,"was_live":bool(raw.get('was_live'))}
     record.write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
     studio.update(job, name=metadata["title"], source_metadata=metadata)
     return target

@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import time
 
-from . import core, local_models, runtime
+from . import core, local_models, runtime, scene_layouts
 from .contracts import remap_words
 from .media import filter_path
 
@@ -206,7 +206,8 @@ def layout_filter(label, out, plan, width, height, index, span, metadata):
         layout = "fit"
     if layout == "crop":
         center = focus[0] + focus[2]/2
-        keyframes = crop_keyframes(index, span, focus, metadata) if index.get("mode") != "gameplay" else []
+        text_present=any(scene_layouts.important_text(t) for s in scene_layouts.samples(index,span['start'],span['end']) for t in s.get('texts',[]))
+        keyframes = crop_keyframes(index, span, focus, metadata) if index.get("mode") != "gameplay" and not text_present else []
         expression = f"{center:.5f}"
         for (a, x), (b, y) in reversed(list(zip(keyframes, keyframes[1:]))):
             expression = f"if(between(t,{a:.3f},{b:.3f}),{x:.5f}+({y-x:.5f})*(t-{a:.3f})/{max(.01,b-a):.3f},{expression})"
@@ -244,11 +245,17 @@ def encoder_options(encoder,final,width,threads=6):
 
 
 def render(studio, job, source, plan, segments, index, metadata, folder, revision=0, final=False):
+    plan=scene_layouts.compile_plan(plan,index,metadata,job['config'])
+    if job['config'].get('render_engine')=='remotion':
+        from .remotion_bridge import render as remotion_render
+        return remotion_render(studio,job,source,plan,segments,index,metadata,folder,revision,final)
     run = lambda args: studio.run(job, args)
     stem = f"c-{plan['id']}-r{revision}-{'final' if final else 'draft'}"
     target = folder / (stem + ".mp4")
     ass_path, srt_path = folder / (stem + ".ass"), folder / (stem + ".srt")
     ass, mapped, preserved = make_ass(plan, segments, index, job["config"].get("style", "kinetic"),job["config"])
+    if job['config'].get('_clean_graphics'):
+        ass=ass.split('[Events]')[0]+'[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'
     ass_path.write_text(ass)
     srt_path.write_text(srt(mapped))
     marker = folder / (stem + ".complete.json")
@@ -257,7 +264,7 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
         profile=studio.data/'render-profile.json'
         settings=json.loads(profile.read_text()) if profile.exists() else {}
         encoder='h264_videotoolbox' if final and settings.get('verified') and settings.get('encoder')=='h264_videotoolbox' else 'libx264'
-    fingerprint = hashlib.sha256(json.dumps({"renderer_version":4,"encoder":encoder,"plan":plan,"config":job["config"],"ass":ass,
+    fingerprint = hashlib.sha256(json.dumps({"renderer_version":5,"encoder":encoder,"plan":plan,"config":job["config"],"ass":ass,
         "source":[str(source),source.stat().st_size,source.stat().st_mtime_ns]},sort_keys=True).encode()).hexdigest()
     completed=json.loads(marker.read_text()) if marker.exists() else {}
     if target.exists() and completed.get("fingerprint") == fingerprint and completed.get("bytes")==target.stat().st_size:
@@ -276,7 +283,7 @@ def render(studio, job, source, plan, segments, index, metadata, folder, revisio
     command = [local_models.binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-filter_complex_threads", "2" if cool else "4", "-y", "-ss", str(left), "-t", str(right-left+.25), "-i", str(source),
                "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
     filters, inputs = [], []
-    for i, span in enumerate(plan["spans"]):
+    for i, span in enumerate(plan.get('render_spans',plan['spans'])):
         a, b = span["start"]-left, span["end"]-left
         raw = f"[raw{i}]"
         if span["kind"] == "freeze":

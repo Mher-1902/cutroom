@@ -329,10 +329,13 @@ def propose(studio,job,index,folder):
         if not ranked_ids:
             cache.unlink(missing_ok=True)
             raise RuntimeError('The head editor returned no valid shortlist. Resume retries only this judge round.')
-        # Invalid/incomplete partitions are never silently accepted.
-        if set(ranked_ids)|set(ranked['duplicate_ids'])!=set(batch):
-            cache.unlink(missing_ok=True)
-            raise RuntimeError('The head editor omitted candidate IDs. Resume retries only this judge round.')
+        # Omitted proposals are unranked backups, never approved clips. Keep
+        # them available for full evidence/edit/critic checks instead of
+        # aborting an hours-long import over an incomplete ordering response.
+        missing=[x for x in batch if x not in ranked_ids and x not in duplicates]
+        if missing:
+            backups.extend(x for x in missing if x not in backups)
+            studio.event(job,f'Ranking kept {len(missing)} unranked proposals as backups. Every selected edit still requires its full evidence and critic checks.')
         carry=ranked_ids[:8]
         backups.extend(x for x in ranked_ids[8:] if x not in backups)
         reason=ranked['reason']

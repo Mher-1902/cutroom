@@ -1,4 +1,6 @@
 data/
+.remotion/
+**/.remotion/
 __pycache__/
 *.pyc
 .DS_Store
