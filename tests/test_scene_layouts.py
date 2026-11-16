@@ -63,6 +63,7 @@ class SceneLayoutTests(unittest.TestCase):
     def test_text_logo_is_not_automatically_treated_as_wide_subtitles(self):
         self.assertFalse(scene_layouts.important_text({'text':'CHANNEL','rect':[.02,.02,.2,.04],'confidence':.95}))
         self.assertTrue(scene_layouts.important_text({'text':'A real explanation','rect':[.1,.7,.8,.04],'confidence':.95}))
+        self.assertTrue(scene_layouts.important_text({'text':'CRIMINAL PROFILE','rect':[.073,.096,.15,.022],'confidence':1}))
 
     def test_explicit_style_crop_is_preserved_and_stale_derived_shots_rebuild(self):
         compiled=scene_layouts.compile_plan(plan(),index(),META,{})

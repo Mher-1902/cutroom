@@ -18,8 +18,11 @@ def samples(index, start, end):
 def important_text(item):
     text = str(item.get('text', '')).strip()
     x, y, w, h = item.get('rect', [0, 0, 0, 0])
-    return (item.get('confidence', 0) >= .55 and len(text) >= 6 and w >= .18
-            and h >= .012 and not (y < .14 and w < .28))
+    # Short source headings can be important even when they occupy less than
+    # 18% of a landscape frame. A real guide regression lost CRIMINAL PROFILE.
+    readable = (len(text)>=6 and w>=.18) or (len(text)>=12 and w>=.10)
+    return (item.get('confidence', 0) >= .55 and readable
+            and h >= .012 and not (y < .14 and w < .28 and len(text)<12))
 
 
 def intersection(a, b):
