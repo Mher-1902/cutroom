@@ -29,6 +29,7 @@ const CutroomProjectStatus = (() => {
   }
   function scouting(job){
     if(job.processing_strategy?.mode!=='long_stream')return '';
+    if(job.config.selection_profile==='creator_highlights')return `Long-video highlights · ${job.status==='complete'?'Selection complete':'Checking standout moments'} · ${(job.clips||[]).length}/${job.config.count} shorts ready`;
     const total=job.processing_strategy.scout_count,progress=job.scout_progress||{};
     const coverage=progress.total?`${progress.complete}/${total} sections scouted${progress.failed?` · ${progress.failed} need attention`:''}`:`${total} scout tasks queued`;
     return `Long-stream mode · ${coverage} · one heavy task at a time · ${(job.clips||[]).length}/${job.config.count} shorts ready`;

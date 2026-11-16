@@ -6,15 +6,20 @@ MAX_CHARACTERS = 159
 TONES = {'funny','dramatic','suspenseful','surprising','impressive','informative','emotional','mixed'}
 
 
-def caption(value):
+def plain_copy(value):
     text=unicodedata.normalize('NFC',re.sub(r'\s+',' ',str(value)).strip())
+    return re.sub(r'^:?(?:bold|italic|regular)\s*:\s*','',text,flags=re.I).strip()
+
+
+def caption(value):
+    text=plain_copy(value)
     if len(text)>MAX_CHARACTERS:
         raise ValueError('Post caption must be shorter than 160 characters, including spaces and hashtags.')
     return text
 
 
 def title(value):
-    text=unicodedata.normalize('NFC',re.sub(r'\s+',' ',str(value)).strip()).lstrip(':;,| ').strip()
+    text=plain_copy(value).lstrip(':;,| ').strip()
     if not any(c.isalnum() for c in text):
         raise ValueError('Write a meaningful source-specific title.')
     return text

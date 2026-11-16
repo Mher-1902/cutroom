@@ -144,6 +144,13 @@ def evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candi
         review=combined_review(visual,story,technical)
         review['story_review_reused']=reusable
         runtime.atomic_json(cache,review)
+    from .editorial_checks import review_problems
+    integrity=review_problems(plan,record['mapped'],job,original_segments,index.get('language',job.get('language')))
+    if integrity:
+        review['reject']=True
+        review['integrity_problems']=integrity
+        review['problems']+= [p for p in integrity if p not in review['problems']]
+        runtime.atomic_json(cache,review)
     if studio is not None:studio.update(job,latest_draft={**preview,'reviewing':False,'score':review['score'],'rejected':review['reject'],'needs_revision':not qualified(review,job['config'])})
     return record,review
 
@@ -316,18 +323,21 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
         studio.event(job,"Inspecting the reveal and reaction more closely: "+candidate["title"])
         candidate["fine_evidence"]=analysis.inspect_candidate(studio,job,source,candidate,index,folder)
     state["candidate"]=candidate
+    runtime.unload()
+    studio.update(job,stage='Aligning selected speech',active_candidate=candidate['title'])
+    studio.event(job,"Aligning speech precisely for "+candidate["title"])
+    audio_source=source if job.get('processing_strategy',{}).get('mode')=='long_stream' else folder/'speech.wav'
+    aligned=analysis.align_candidate(studio,job,folder,audio_source,segments,candidate,index["language"])
     plan_path=folder/f"plan-{ident}-r{starting_revision}.json"
     if plan_path.exists():
         plan=json.loads(plan_path.read_text())
     else:
+        studio.update(job,stage='Directing the edit')
         studio.event(job,"Directing the edit: "+candidate["title"])
         prior=state.get("latest_plan")
-        plan=director.make_plan(studio,job,candidate,index,segments,previous=prior,feedback=user_notes)
+        plan=director.make_plan(studio,job,candidate,index,aligned,previous=prior,feedback=user_notes)
         runtime.atomic_json(plan_path,plan)
     runtime.unload()
-    studio.event(job,"Aligning speech precisely for "+candidate["title"])
-    audio_source=source if job.get('processing_strategy',{}).get('mode')=='long_stream' else folder/'speech.wav'
-    aligned=analysis.align_candidate(studio,job,folder,audio_source,segments,candidate,index["language"])
     history=state.setdefault("revisions",[])
     for offset in range(3):
         revision=starting_revision+offset
@@ -378,7 +388,7 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
             continue
         previous_plan=deepcopy(plan)
         if actions & {"tighten","more_context"} or review["reject"] or review["metrics"]["hook"]<3 or review["metrics"]["clarity"]<3 or review["metrics"]["payoff"]<3 or not actions:
-            plan=director.make_plan(studio,job,candidate,index,segments,previous=plan,
+            plan=director.make_plan(studio,job,candidate,index,aligned,previous=plan,
                                     feedback={"review":review,"user_notes":user_notes})
         plan=director.apply_revision_actions(plan,review)
         if same_render(previous_plan,plan):
@@ -556,6 +566,7 @@ def pipeline(studio,job):
 
 def refine(studio,job):
     request=job["pending_refine"]
+    studio.update(job,stage='Refining clip',progress=50)
     folder=studio.jobs_dir/job["id"]
     old=next(c for c in job["clips"] if c["id"]==request["clip_id"])
     states=json.loads((folder/"candidate-progress.json").read_text())

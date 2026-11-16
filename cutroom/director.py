@@ -352,10 +352,22 @@ def repair_duration(studio, job, raw, candidate, index, segments, bounds, feedba
 def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=None):
     """The LLM directs measured windows/cue IDs; code owns all timeline math."""
     low,high=job['config']['min_duration'],job['config']['max_duration']
-    bounds=(max(0,candidate['start']-8),min(index['duration'],candidate['end']+8))
+    padding=0 if candidate.get('boundary_policy')=='exact' else 8
+    bounds=(max(0,candidate['start']-padding),min(index['duration'],candidate['end']+padding))
     used=[clip for clip in job.get('clips',[]) if clip.get('id')!=candidate['id']]
     windows={key:value for key,value in candidate_windows(*bounds,segments,low,high).items()
              if low<=value[1]-value[0]<=high}
+    # A duration range needs shorter choices too, not only maximum-length cuts.
+    for length in sorted({low,(low+high)/2}):
+        additions=[pair for pair in candidate_windows(*bounds,segments,low,length).values() if low<=pair[1]-pair[0]<=high]
+        if len(additions)>6:additions=[additions[round(i*(len(additions)-1)/5)] for i in range(6)]
+        for a,b in additions:
+            if low<=b-a<=high and [a,b] not in windows.values():
+                windows[f'W{len(windows)+1:03}']=[a,b]
+    from . import editorial_checks
+    if index.get('language')=='en':
+        windows={key:value for key,value in windows.items()
+                 if not editorial_checks.dangling(editorial_checks.interval_tail(segments,*value))}
     # Add a few actual setup-sentence starts between the uniform anchors.
     # These propose windows only; the independent selector verifies the whole
     # event. A grid alone can miss a clean start by twenty seconds.
@@ -389,6 +401,11 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
     if original_rows and not rows:
         raise RuntimeError('Director could not produce a safe, valid timeline: this source event is already represented in the collection')
     chosen=None
+    selection_feedback=feedback
+    if isinstance(feedback,dict):
+        review=feedback.get('review',{})
+        selection_feedback={'user_notes':feedback.get('user_notes'),'problems':review.get('problems',[]),
+                            'reason':review.get('reason'),'weakness':review.get('weakness')}
     if rows:
         event_schema={'type':'object','properties':{
             'start_id':{'type':'string','enum':list(rows)},'end_id':{'type':'string','enum':list(rows)},
@@ -407,10 +424,12 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
                 'Preserve could-have versus actual results. Include the resolved outcome AND a brief immediate reaction. '
                 'End before trailing photo instructions, unrelated introductions and filler. '
                 'The suggested title may be wrong; choose the complete event supported by the transcript. '
+                'Apply the revision feedback to the source interval itself, including requests to remove an unrelated opening or finish the actual takeaway. '
                 'All material BETWEEN the two IDs will be retained. End on the actual payoff, not an ongoing attempt. '
                 'Set complete=false if no event is complete. Source boundaries are computed by code.\n'+
                 json.dumps({'suggested_title':candidate.get('title'),'source_title':job.get('source_metadata',{}).get('title',''),
                     'requested_seconds':[low,high],'verified_highlight_peak':candidate.get('highlight_peak'),
+                    'revision_feedback':selection_feedback,'previous_bounds':[previous.get('start'),previous.get('end')] if previous else None,
                     'source_highlight':candidate.get('highlight_evidence',{}).get('raw'),
                     'already_used_source_intervals':[[c['start'],c['end']] for c in used],'source_segments':[
                     {'id':ident,**{k:s[k] for k in ('start','end','text')}} for ident,s in rows.items()]},
@@ -419,13 +438,15 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
                 break
             a,b=rows[event['start_id']]['start'],rows[event['end_id']]['end']
             duplicate=any(core.overlap_fraction({'start':a,'end':b},clip)>.20 for clip in used)
-            if bounds[0]<=a<b<=bounds[1] and low<=b-a<=high and not duplicate and interval_contains_peak(a,b,candidate):
+            complete_ending=index.get('language')!='en' or not editorial_checks.dangling(editorial_checks.interval_tail(segments,a,b))
+            if bounds[0]<=a<b<=bounds[1] and low<=b-a<=high and not duplicate and interval_contains_peak(a,b,candidate) and complete_ending:
                 windows['EVENT']=[a,b]
                 chosen={'window_id':'EVENT','complete':True,'reason':event['reason']}
                 break
             correction=(f'\nThe measured interval was {b-a:.2f} seconds; this edit must be {low}–{high} seconds. '
                         'Choose different real sentence IDs retaining the SAME essential setup and outcome, or set complete=false. '
                         'Do not retain unrelated lead-in, trailing applause, photo instructions or an already used source event.')
+            if not complete_ending:correction+=' The chosen ending cuts a sentence off mid-thought. Choose a complete closing sentence.'
     if chosen is None:
         chosen=call(studio,job,COMMON,
             f'Select ONE measured {low}–{high}-second window containing a complete standalone topic or event. '
@@ -433,7 +454,7 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
             'For gameplay/challenges/reactions, require setup, development and actual outcome or response. '
             'Each packet contains only its own interval observations. Do not borrow another window\'s payoff. '
             'Set complete=false if no complete event is supported. Return one supplied window_id.\n'+
-            json.dumps({'proposed_title':candidate.get('title'),'packets':packets},ensure_ascii=False,separators=(',',':')),
+            json.dumps({'proposed_title':candidate.get('title'),'packets':packets,'revision_feedback':selection_feedback},ensure_ascii=False,separators=(',',':')),
             selection_schema,predict=240)
     if chosen.get('complete') is not True or chosen.get('window_id') not in windows:
         raise RuntimeError('Director could not produce a safe, valid timeline: no complete event fits the requested duration')
@@ -480,7 +501,9 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
                  'CTA invites a NEW viewer reaction, not a quote. Preserve could-have versus actual outcomes. '
                  'Aim for 80–120 characters in post copy; always stay under 160 including spaces/hashtags. '
                  'Use a conversational, specific teaser with the actual stakes or surprising detail, rather than a generic scene summary.\n'+
+                 'Use only the game versions listed in source_identity; if that list is empty, use generic wording without adding a game version. Do not infer the game version from background footage.\n'+
                  json.dumps({'selected_source_window':[start,end],'stage_evidence':stage_evidence,
+                             'source_identity':editorial_checks.source_identity(job,segments),
                              'verified_highlight':candidate.get('highlight_evidence',{}).get('raw'),
                              'visual_shots':visual.get('shot_suggestions',[]),'feedback':feedback},ensure_ascii=False,separators=(',',':')))
     correction=''
@@ -489,6 +512,8 @@ def measured_plan(studio,job,candidate,index,segments,previous=None,feedback=Non
             copy=call(studio,job,COMMON,copy_prompt+correction,copy_schema,predict=1050)
             validate_brief(copy['story_brief']);caption(copy['post_caption'])
             copy['title']=title(copy['title'])
+            issue=editorial_checks.copy_issue(copy,editorial_checks.source_identity(job,segments))
+            if issue:raise ValueError(issue)
             break
         except (ValueError,runtime.vllm_backend.IncompleteResponse) as exc:
             if attempt:raise
