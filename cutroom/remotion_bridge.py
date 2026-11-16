@@ -64,7 +64,7 @@ def open_studio(studio, job):
     studio.save(job)
     studio.event(job,'Remotion Studio is ready. Your saved MP4 is preserved. Preview, edit layers, and render in Studio.')
 
-from . import caption_styles, core, runtime
+from . import caption_styles, core, runtime, scene_layouts
 from .remotion_knowledge import RUNTIME_VERSION
 
 
@@ -122,9 +122,10 @@ def compile_project(root, workspace, plan, mapped, suppressed, config, base):
     words=caption_styles.words(mapped)
     mode=config.get('style','auto')
     if mode=='auto':mode=plan.get('caption_style','kinetic')
-    for i,span in enumerate(plan['spans']):
+    render_spans=plan.get('render_spans',plan['spans'])
+    for i,span in enumerate(render_spans):
         a=round(span['out_start']*30)
-        b=total if i==len(plan['spans'])-1 else min(total,round(span['out_end']*30))
+        b=total if i==len(render_spans)-1 else min(total,round(span['out_end']*30))
         if b<=a:continue
         nodes.append(f'<Sequence name="Scene {i+1}" from={{{a}}} trimBefore={{{a}}} durationInFrames={{{b-a}}} premountFor={{fps}}>')
         nodes.append('<Video src={staticFile("prepared.mp4")} premountFor={fps} style={{width:1080,height:1920,objectFit:"fill"}} />')
@@ -132,7 +133,7 @@ def compile_project(root, workspace, plan, mapped, suppressed, config, base):
             current=[];groups=[]
             measure=caption_styles.font_measure(prefs['font'],prefs['size'])
             for word in words:
-                if not span['out_start']<=word['start']<span['out_end']:continue
+                if word['end']<=span['out_start'] or word['start']>=span['out_end']:continue
                 if any(word['start']<end and word['end']>start for start,end in suppressed):continue
                 if current and (len(current)>=prefs['max_words'] or word['start']-current[-1]['end']>.4 or
                                 measure(' '.join(w['text'] for w in current+[word]))>850):
@@ -142,6 +143,9 @@ def compile_project(root, workspace, plan, mapped, suppressed, config, base):
             for group in groups:
                 start=max(a,round(group[0]['start']*30));end=min(b,math.ceil(group[-1]['end']*30))
                 if end<=start:continue
+                if prefs['position']=='auto':
+                    y=scene_layouts.graphic_y(plan,group[0]['start'],group[-1]['end']-group[0]['start'],'caption',prefs['size']*1.35)
+                    if plan.get('layout_ranges'):y=round(y-prefs['size']*1.12+60)
                 caps=captions_for(group,start/30,end/30,start/30,prefs['case']=='uppercase')
                 props={'from':start,'durationInFrames':end-start,'captions':caps,
                        'accent':prefs['accent'],'size':prefs['size'],'font':caption_styles.FONTS[prefs['font']],
@@ -155,6 +159,10 @@ def compile_project(root, workspace, plan, mapped, suppressed, config, base):
         size=72 if cue['kind']=='hook' else 62
         while len(caption_styles.wrap(cue['text'],prefs['font'],size))>3 and size>48:size-=4
         title_y=1530 if prefs['position']=='upper' else (370 if plan['layout']!='fit' else 340)
+        if prefs['position']=='auto':
+            text_height=len(caption_styles.wrap(cue['text'],prefs['font'],size))*size*1.25
+            title_y=scene_layouts.graphic_y(plan,cue['at'],cue['duration'],'title',text_height)
+            if plan.get('layout_ranges'):title_y=round(title_y-(text_height+23)/2)
         nodes.append('<CutroomTitle '+attributes(**{'from':start,'durationInFrames':end-start,'premountFor':30,
             'text':cue['text'],'accent':prefs['accent'],'y':title_y,'size':size,'motion':motion})+' />')
     for span in plan['spans']:
@@ -186,6 +194,7 @@ registerRoot(Root);
 
 def prepare(studio,job,source,plan,segments,index,metadata,folder,revision=0,final=False):
     from . import render_v2
+    plan=scene_layouts.compile_plan(plan,index,metadata,job['config'])
     workspace=folder/'remotion'/f"{plan['id']}-r{revision}-{'final' if final else 'draft'}"
     basefolder=workspace/'media'
     basefolder.mkdir(parents=True,exist_ok=True)

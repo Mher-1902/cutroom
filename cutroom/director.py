@@ -629,7 +629,7 @@ def make_plan(studio, job, candidate, index, segments, previous=None, feedback=N
              "Post copy is a specific conversational tease about this real moment, not a transcript summary or generic engagement spam. "
              "For normal/replay spans, duration can be 0 (calculated by code); for freezes supply the exact positive duration.\n")
     if previous:
-        previous={k:v for k,v in previous.items() if k!='mapping'}
+        previous={k:v for k,v in previous.items() if k not in {'mapping','render_spans','layout_ranges','layout_version'}}
     if isinstance(feedback,dict) and isinstance(feedback.get('review'),dict):
         review=feedback['review']
         feedback={'user_notes':feedback.get('user_notes'),'reason':review.get('reason','')[:700],

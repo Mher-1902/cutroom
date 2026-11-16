@@ -8,7 +8,7 @@ import zipfile
 from . import analysis, core, director, render_v2, runtime, source_media, source_cache
 from .contracts import ClipEditPlan, DraftReview, REVIEW_WEIGHTS
 from .source_policy import strategy
-from . import highlights
+from . import highlights, agents, scene_layouts
 
 
 def calibration_text(index_duration, segments, attention_hint=0,visual=None):
@@ -78,6 +78,7 @@ def package(studio,job,folder,states,index):
             "coverage":{"duration":index["duration"],"frames":index["frames_analyzed"],"fps":index["frame_sampling_fps"],"blocks":len(index["blocks"]),
                         "complete":index.get('coverage_complete',True),"failed_scouts":index.get('failed_scouts',[]),
                         "note":index.get('observation_note')},
+            "agent_workflow":json.loads((folder/'agent-workflow.json').read_text()) if (folder/'agent-workflow.json').exists() else None,
             "candidates":states,"clips":job["clips"],"validation_scope":job.get('validation_scope'),"failure_summary":job.get('failure_summary'),"inference":job.get("inference",[]),
             "licensed_finishing_assets":list(used.values()),
             "transcript_provenance":json.loads((folder/'transcript-provenance.json').read_text()) if (folder/'transcript-provenance.json').exists() else {'preferred_text':'whisper'},
@@ -167,7 +168,7 @@ def retry_review(studio,job,operation):
 
 
 def same_render(first,second):
-    fields=('spans','layout','focus','facecam','music_mood','music_gain','caption_style',
+    fields=('spans','layout','focus','facecam','render_spans','layout_ranges','music_mood','music_gain','caption_style',
             'caption_position','overlays','zooms','sfx','screen_hook')
     return {k:first.get(k) for k in fields} == {k:second.get(k) for k in fields}
 
@@ -322,6 +323,8 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
     if not candidate.get("fine_evidence"):
         studio.event(job,"Inspecting the reveal and reaction more closely: "+candidate["title"])
         candidate["fine_evidence"]=analysis.inspect_candidate(studio,job,source,candidate,index,folder)
+    agents.record(folder,ident,'observer','inspect_source',{'source_interval':[candidate['start'],candidate['end']]},
+                  {'artifact':f'fine-{ident}.json','sampled_evidence':True})
     state["candidate"]=candidate
     runtime.unload()
     studio.update(job,stage='Aligning selected speech',active_candidate=candidate['title'])
@@ -348,13 +351,29 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
             plan=json.loads(path.read_text())
         else:
             runtime.atomic_json(path,plan)
-        state["latest_plan"]=plan
         plan=highlights.configure_plan(plan,candidate,job['config'])
-        if candidate.get('highlight_peak'):runtime.atomic_json(path,plan)
+        plan=scene_layouts.compile_plan(plan,index,metadata,job['config'])
+        state['latest_plan']=plan
+        runtime.atomic_json(path,plan)
+        agents.record(folder,ident,'director','create_edit_plan',{'observer_artifact':f'fine-{ident}.json'},
+                      {'artifact':path.name,'source_spans':plan['mapping'],'strategy':plan.get('editing_strategy')},revision)
+        agents.record(folder,ident,'framer','compile_layouts',{'native_regions':index.get('native_region_frames',0)},
+                      {'layouts':plan['layout_ranges']},revision)
+        conflict=agents.collection_conflict(plan,job.get('clips',[]))
+        if conflict:
+            agents.record(folder,ident,'lead','replace_candidate',{'collection_conflict':conflict},
+                          {'reason':'The edit repeats too much source footage from an existing clip.'},revision)
+            state.update(status='duplicate',rejection_reason='This edit repeats an existing clip’s source event.',duplicate_of=conflict)
+            checkpoint_candidate(folder,ident,state)
+            studio.event(job,'Skipping a repeated source event before rendering. Choosing a different moment.')
+            return None
         checkpoint_candidate(folder,ident,state)
         studio.event(job,f"Rendering and reviewing draft {offset+1}/3: {candidate['title']}")
         runtime.unload()
         draft,review=evaluate(studio,job,source,plan,aligned,index,metadata,folder,revision,candidate,segments)
+        agents.record(folder,ident,'renderer','render_video',{'plan':path.name},
+                      {'video':draft['path'].name,'render_seconds':draft.get('render_seconds')},revision)
+        agents.record(folder,ident,'critic','review_draft',{'video':draft['path'].name},review,revision)
         if not any(h["revision"]==revision for h in history):
             history.append({"revision":revision,"plan":plan,"review":review,"draft":f"/files/{job['id']}/{draft['path'].name}"})
         checkpoint_candidate(folder,ident,state)
@@ -374,12 +393,21 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
                       "video":f"/files/{job['id']}/{final['path'].name}","thumbnail":f"/files/{job['id']}/{cover.name}",
                       "subtitles":f"/files/{job['id']}/{final['srt'].name}","editable_captions":f"/files/{job['id']}/{final['ass'].name}"}
                 state.update(status="qualified",review=final_review,latest_plan=plan)
+                decision=agents.judge_review(final_review,True,False)
+                agents.record(folder,ident,'lead','export',{'review_score':final_review['score'],
+                              'technical':final_review['technical'],'video':final['path'].name},decision,revision)
                 checkpoint_candidate(folder,ident,state)
                 return clip
             review=final_review
         state["review"]=review
-        if offset==2:
-            break
+        decision=agents.judge_review(review,False,offset<2)
+        agents.record(folder,ident,'lead',decision['action'],{'critic_score':review['score'],
+                      'technical_passed':review['technical']['passed']},decision,revision)
+        if decision['action']=='replace_candidate':
+            state.update(status='rejected',rejection_reason=decision['reason'])
+            checkpoint_candidate(folder,ident,state)
+            studio.event(job,decision['reason']+' Checking another source moment.')
+            return None
         studio.event(job,f"Critic scored {review['score']}/100. Revising specific weaknesses before the next draft.")
         actions={p["action"] for p in review["problems"]}-{"none"}
         if (folder/f"plan-{ident}-r{revision+1}.json").exists():
@@ -387,10 +415,11 @@ def work_candidate(studio,job,source,candidate,index,segments,metadata,folder,st
             # plan which the next iteration would immediately overwrite.
             continue
         previous_plan=deepcopy(plan)
-        if actions & {"tighten","more_context"} or review["reject"] or review["metrics"]["hook"]<3 or review["metrics"]["clarity"]<3 or review["metrics"]["payoff"]<3 or not actions:
+        if decision['action']=='revise_plan':
             plan=director.make_plan(studio,job,candidate,index,aligned,previous=plan,
                                     feedback={"review":review,"user_notes":user_notes})
         plan=director.apply_revision_actions(plan,review)
+        plan=scene_layouts.compile_plan(plan,index,metadata,job['config'])
         if same_render(previous_plan,plan):
             state.update(status='rejected',latest_plan=plan,rejection_reason='The proposed revision did not change the rendered edit.')
             studio.event(job,'The editor returned an unchanged edit. Moving to a different moment instead of repeating the same video.')
@@ -411,8 +440,9 @@ def process_candidate(studio,job,source,candidate,index,segments,metadata,folder
         prepare_initial_pool(studio,job,source,[candidate],index,segments,metadata,folder,states)
         if state['status']=='rejected':return None
     planned=json.loads((folder/f"plan-{candidate['id']}-r0.json").read_text())
-    if any(core.overlap_fraction(planned,clip)>.20 for clip in job['clips']):
-        state['status']='duplicate'
+    conflict=agents.collection_conflict(planned,job['clips'])
+    if conflict:
+        state.update(status='duplicate',duplicate_of=conflict)
         checkpoint_candidate(folder,candidate['id'],state)
         return None
     return work_candidate(studio,job,source,candidate,index,segments,metadata,folder,state)
@@ -478,6 +508,10 @@ def pipeline(studio,job):
     studio.update(job,stage="Finding complete moments",progress=40)
     candidates=(highlights.propose(studio,job,index,segments,folder,source) if highlights.enabled(job)
                 else director.propose(studio,job,index,segments,folder))
+    agents.record(folder,'source','scout','propose_moments',{'strategy':index.get('analysis_strategy'),
+                  'source_duration':index['duration'],'coverage_complete':index.get('coverage_complete',True)},
+                  {'candidate_ids':[c['id'] for c in candidates], 'count':len(candidates),
+                   'note':'Proposals require independent inspection and draft review.'})
     states_path=folder/"candidate-progress.json"
     states=json.loads(states_path.read_text()) if states_path.exists() else {}
     if recover_server_errors(states):

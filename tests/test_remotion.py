@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from cutroom import remotion_bridge as bridge, remotion_knowledge as knowledge
-from cutroom.contracts import remap_words
+from cutroom.contracts import remap_words,ClipEditPlan
 
 
 class RemotionTests(unittest.TestCase):
@@ -77,7 +77,9 @@ class RemotionTests(unittest.TestCase):
         with patch.object(bridge,'render',side_effect=AssertionError('Unexpected migration')):
             with patch.object(render_v2,'make_ass',side_effect=ValueError('classic renderer')):
                 with self.assertRaisesRegex(ValueError,'classic renderer'):
-                    render_v2.render(object(),{'config':{}},None,{'id':'a'},[],{},None,Path('/tmp'))
+                    render_v2.render(object(),{'config':{}},None,ClipEditPlan.parse(
+                        {'id':'a','spans':[{'start':0,'end':7}]},10,5,10).to_dict(),[],{},
+                        {'width':1920,'height':1080},Path('/tmp'))
 
 
 if __name__=='__main__':unittest.main()

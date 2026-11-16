@@ -7,6 +7,7 @@ from cutroom import director
 from cutroom import pipeline_v2
 from cutroom.post_copy import caption,title
 from cutroom import editorial_checks as checks
+from cutroom.contracts import ClipEditPlan
 
 
 class EditorialChecksTests(unittest.TestCase):
@@ -22,10 +23,11 @@ class EditorialChecksTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as name,patch.object(pipeline_v2.runtime,'unload'), \
              patch.object(pipeline_v2.analysis,'densify_regions'), \
              patch.object(pipeline_v2.analysis,'align_candidate',return_value=aligned), \
-             patch.object(pipeline_v2.director,'make_plan',return_value={'duration':70}) as plan, \
+             patch.object(pipeline_v2.director,'make_plan',return_value=ClipEditPlan.parse(
+                 {'id':'event','spans':[{'start':26.172,'end':96.172}]},120,60,90).to_dict()) as plan, \
              patch.object(pipeline_v2,'evaluate',side_effect=RenderReached):
             with self.assertRaises(RenderReached):
-                pipeline_v2.work_candidate(Studio(),job,Path('source'),candidate,{'language':'en'},[],{},Path(name),state,
+                pipeline_v2.work_candidate(Studio(),job,Path('source'),candidate,{'language':'en'},[],{'width':1920,'height':1080},Path(name),state,
                                            user_notes='Correct the ending.',starting_revision=1)
         self.assertIs(plan.call_args.args[4],aligned)
 

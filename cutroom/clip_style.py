@@ -79,6 +79,7 @@ def restyle(studio,job):
             plan['overlays'].append({'at':0,'duration':min(3,plan['duration']*.1),'kind':'hook','story_role':'hook','text':hook})
     if request['layout']!='keep':
         plan['layout']=request['layout']
+        plan['framing_override']=True
         fraction=min(1,(9/16)/(job['metadata']['width']/job['metadata']['height']))
         x=max(0,min(1-fraction,request['focus_x']-fraction/2))
         plan['focus']=[x,0,fraction,1] if plan['layout']=='crop' else [0,0,1,1]
@@ -86,6 +87,8 @@ def restyle(studio,job):
             span.pop('layout',None)
             span.pop('focus',None)
     index=json.loads((folder/'scene-index.json').read_text())
+    from . import scene_layouts
+    plan=scene_layouts.compile_plan(plan,index,job['metadata'],job['config'])
     aligned=speech(studio,job,old)
     revisions=[old.get('revision',0)]+[int(p.stem.rsplit('-r',1)[1]) for p in folder.glob(f"plan-{old['id']}-r*.json")]
     # Reuse this revision if a restyle render was interrupted; fingerprints

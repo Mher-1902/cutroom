@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 import re
 
-from . import core
+from . import core, scene_layouts
 
 FONTS = {"sans": "Cutroom Sans", "studio": "Cutroom Studio"}
 PRESETS = {
@@ -131,6 +131,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             start, end = max(0,group[0]["start"]), min(plan["duration"],group[-1]["end"])
             if end<=start or any(max(start,a)<min(end,b) for a,b in suppressed):
                 continue
+            if position=='auto':
+                y=scene_layouts.graphic_y(plan,start,end-start,'caption',size*1.35)
             # Unaligned phrases fade as a whole: do not invent word timings.
             if prefs["animation"] == "fade" or len(group)==1:
                 text = "\\N".join(core.ass_escape(line) for line in wrap(transform(" ".join(w["text"] for w in group)),prefs["font"],size))
@@ -156,6 +158,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         heading_y = 432 if fit else 370
         if position=="upper":
             heading_y=1530
+        elif position=='auto':
+            heading_y=scene_layouts.graphic_y(plan,overlay['at'],overlay['duration'],'title',len(lines)*heading_size*1.25)
         text = "\\N".join(core.ass_escape(line) for line in lines)
         emit(1,overlay["at"],min(plan["duration"],overlay["at"]+overlay["duration"]),"Story",
              f"{{\\pos(540,{heading_y})\\fs{heading_size}\\fad(90,120)}}"+text)
