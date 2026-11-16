@@ -280,10 +280,13 @@ class RecoveryTests(unittest.TestCase):
                 jobs_dir=folder.parent
                 data=folder
                 def event(self,*a):pass
+                def update(self,job,**fields):job.update(fields)
             job={'id':folder.name,'pending_refine':{'clip_id':ident,'notes':'new notes'},'clips':[old],'source_file':str(folder/'source.mp4'),'metadata':{}}
             with patch('cutroom.pipeline_v2.work_candidate',return_value=None) as work, patch('cutroom.pipeline_v2.package'),patch('cutroom.pipeline_v2.runtime.unload'):
                 pipeline_v2.refine(Studio(),job)
             self.assertEqual(work.call_args.kwargs['starting_revision'],6)
             self.assertEqual(work.call_args.kwargs['user_notes'],'new notes')
+            self.assertEqual(job['stage'],'Refining clip')
+            self.assertEqual(job['progress'],50)
 
 if __name__=='__main__':unittest.main()
